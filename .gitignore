@@ -1,0 +1,17 @@
+
+
+#Ignore vscode AI rules
+.github\instructions\codacy.instructions.md
+
+
+# Ignore IntelliJ IDEA project files
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Ignore build output
+target/
+out/
+# Ignore log files
+*.log
