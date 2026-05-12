@@ -300,20 +300,23 @@ public class ZKTerminal {
      * Returns null if the packet is not a valid attendance event.
      *
      * Realtime EF_ATTLOG payload layout (after the 8-byte UDP header):
-     *   [0-23]  userID     (24 bytes, ASCII null-padded) — starts directly, NO binary userSN prefix
-     *   [24]    verifyType (1 byte)
-     *   [25-28] encodedTime (4 bytes little-endian uint32)
-     *   [29]    verifyState (1 byte)
+     * [0-23] userID (24 bytes, ASCII null-padded) — starts directly, NO binary
+     * userSN prefix
+     * [24] verifyType (1 byte)
+     * [25-28] encodedTime (4 bytes little-endian uint32)
+     * [29] verifyState (1 byte)
      */
     private AttendanceRecord parseRealtimeAttendance(int[] response) throws ParseException {
         // Payload starts after the 8-byte header
         int offset = 8;
 
-        // userID: 24 bytes ASCII, null-padded — starts immediately (no binary userSN prefix)
+        // userID: 24 bytes ASCII, null-padded — starts immediately (no binary userSN
+        // prefix)
         StringBuilder userIdBuilder = new StringBuilder();
         for (int i = 0; i < 24; i++) {
             int c = response[offset + i];
-            if (c == 0) break;
+            if (c == 0)
+                break;
             userIdBuilder.append((char) c);
         }
         String userId = userIdBuilder.toString().trim();
