@@ -12,16 +12,37 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-/** Snapshot suitable for JSON storage or reimport on a compatible reader. */
+/**
+ * Snapshot d'un profil et de ses templates pour stockage JSON/BLOB ou réimport.
+ * Le profil est copié ; les listes et erreurs exposées ne sont pas modifiables.
+ * <pre>{@code
+ * UserBiometricData data = terminal.getUserWithFingerprints("EMP0001");
+ * String json = new ObjectMapper().writeValueAsString(data);
+ * }</pre>
+ * @see com.zkteco.terminal.ZKTerminal#getUserWithFingerprints(String)
+ */
 public final class UserBiometricData {
     private final UserInfo user;
     private final List<FingerprintTemplate> fingerprints;
     private final Map<Integer, String> fingerprintReadErrors;
 
+    /**
+     * Construit un snapshot sans erreur de lecture.
+     * @param user profil non null, copié
+     * @param fingerprints templates non null, avec des indices distincts ; liste vide autorisée
+     * @throws IllegalArgumentException si le profil, la liste ou les templates sont invalides
+     */
     public UserBiometricData(UserInfo user, List<FingerprintTemplate> fingerprints) {
         this(user, fingerprints, Collections.<Integer, String>emptyMap());
     }
 
+    /**
+     * Construit ou désérialise un snapshot avec les erreurs des doigts non lus.
+     * @param user profil non null, copié
+     * @param fingerprints templates récupérés, avec des indices distincts
+     * @param fingerprintReadErrors messages par indice de 0 à 9 ; null signifie aucune erreur
+     * @throws IllegalArgumentException si une entrée est invalide ou si un indice a un template et une erreur
+     */
     @JsonCreator
     public UserBiometricData(@JsonProperty("user") UserInfo user,
             @JsonProperty("fingerprints") List<FingerprintTemplate> fingerprints,
@@ -50,10 +71,30 @@ public final class UserBiometricData {
         this.fingerprintReadErrors = Collections.unmodifiableMap(errors);
     }
 
-    public UserInfo getUser() { return new UserInfo(user); }
-    public List<FingerprintTemplate> getFingerprints() { return fingerprints; }
-    public Map<Integer, String> getFingerprintReadErrors() { return fingerprintReadErrors; }
-    /** True only if all requested reads succeeded; does not imply all ten fingers were requested. */
+    /** @return copie du profil ; ses modifications n'altèrent pas ce snapshot */
+    public UserInfo getUser() {
+        return new UserInfo(user);
+    }
+
+    /** @return liste non modifiable des templates effectivement récupérés */
+    public List<FingerprintTemplate> getFingerprints() {
+        return fingerprints;
+    }
+
+    /**
+     * @return erreurs non modifiables par indice ; le code 4993 ne prouve pas l'absence du doigt
+     */
+    public Map<Integer, String> getFingerprintReadErrors() {
+        return fingerprintReadErrors;
+    }
+
+    /**
+     * Indique si toutes les lectures demandées ont réussi.
+     * Ne signifie ni que dix doigts ont été demandés ni que la liste contient un template.
+     * @return true si aucune erreur de lecture n'est stockée
+     */
     @JsonIgnore
-    public boolean isComplete() { return fingerprintReadErrors.isEmpty(); }
+    public boolean isComplete() {
+        return fingerprintReadErrors.isEmpty();
+    }
 }

@@ -8,6 +8,13 @@ import java.util.List;
 
 import com.zkteco.Enum.UserRoleEnum;
 
+/**
+ * Profil utilisateur modifiable, sans les octets d'empreinte.
+ * <p>{@code userid} est l'identifiant métier externe. {@code uid} est l'identifiant
+ * interne d'un lecteur ; il peut changer après suppression ou transfert.
+ * Les champs sont validés par {@link UserRecordCodec} lors de l'écriture.
+ * @see UserBiometricData
+ */
 public class UserInfo {
 
     private int uid;
@@ -23,22 +30,27 @@ public class UserInfo {
     private int timeZone3;
     private boolean enabled = true;
 
+    /** @return true si le profil est activé pour la vérification sur le lecteur */
     public boolean isEnabled() {
         return enabled;
     }
 
+    /** @param enabled état d'activation du profil */
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
     }
 
+    /** @return UID interne du lecteur ; 0 peut signifier qu'aucun UID n'est encore attribué */
     public int getUid() {
         return uid;
     }
 
+    /** @param uid UID interne ; {@code addUser} détermine l'UID destination par userid */
     public void setUid(int uid) {
         this.uid = uid;
     }
 
+    /** @return rôle/privilège du profil */
     public UserRoleEnum getRole() {
         return role;
     }
@@ -47,34 +59,42 @@ public class UserInfo {
         this.role = userDefault;
     }
 
+    /** @return mot de passe du profil, présent aussi lors d'une sérialisation JSON */
     public String getPassword() {
         return password;
     }
 
+    /** @param password mot de passe, au maximum 8 octets ASCII à l'écriture */
     public void setPassword(String password) {
         this.password = password;
     }
 
+    /** @return nom affiché de l'utilisateur */
     public String getName() {
         return name;
     }
 
+    /** @param name nom, au maximum 23 octets dans l'encodage du lecteur à l'écriture */
     public void setName(String name) {
         this.name = name;
     }
 
+    /** @return numéro de carte non signé sur 32 bits, porté par un long Java */
     public long getCardno() {
         return cardno;
     }
 
+    /** @param cardno numéro entre 0 et 4294967295, contrôlé à l'écriture */
     public void setCardno(long cardno) {
         this.cardno = cardno;
     }
 
+    /** @return identifiant métier externe servant à rechercher/créer/mettre à jour le profil */
     public String getUserid() {
         return userid;
     }
 
+    /** @param userid identifiant métier ; le format 72 octets accepte 1 à 9 octets ASCII */
     public void setUserid(String userid) {
         this.userid = userid;
     }
@@ -87,6 +107,10 @@ public class UserInfo {
         this.groupNumber = groupNumber;
     }
 
+    /**
+     * @return numéro de groupe de 0 à 255, 0 si non défini
+     * @throws IllegalStateException si la représentation textuelle du groupe est invalide
+     */
     public int getGroupId() {
         if (groupNumber == null || groupNumber.trim().isEmpty()) {
             return 0;
@@ -102,6 +126,10 @@ public class UserInfo {
         }
     }
 
+    /**
+     * @param groupId numéro de groupe de 0 à 255
+     * @throws IllegalArgumentException si le groupe est hors plage
+     */
     public void setGroupId(int groupId) {
         if (groupId < 0 || groupId > 255) {
             throw new IllegalArgumentException("groupId must be between 0 and 255");
@@ -141,6 +169,15 @@ public class UserInfo {
         this.timeZone3 = timeZone3;
     }
 
+    /**
+     * Construit un profil avec un UID connu, activé et dans le groupe 0.
+     * @param uid UID interne du lecteur
+     * @param user_id identifiant métier externe
+     * @param name nom affiché
+     * @param password mot de passe
+     * @param privilege rôle du profil
+     * @param cardno numéro de carte non signé sur 32 bits
+     */
     public UserInfo(int uid, String user_id, String name, String password, UserRoleEnum privilege, long cardno) {
         this.userid = user_id;
         this.name = name;
@@ -151,6 +188,14 @@ public class UserInfo {
         this.uid = uid;
     }
 
+    /**
+     * Construit un profil à créer, avec UID 0, activé et dans le groupe 0.
+     * @param user_id identifiant métier ; l'UID sera déterminé par le terminal
+     * @param name nom affiché
+     * @param password mot de passe
+     * @param privilege rôle du profil
+     * @param cardno numéro de carte non signé sur 32 bits
+     */
     public UserInfo(String user_id, String name, String password, UserRoleEnum privilege, long cardno) {
         this.userid = user_id;
         this.name = name;
@@ -160,6 +205,11 @@ public class UserInfo {
         this.groupNumber = "0";
     }
 
+    /**
+     * Copie tous les champs d'un profil, sans partager un objet modifiable.
+     * @param other profil non null
+     * @throws IllegalArgumentException si le profil est null
+     */
     public UserInfo(UserInfo other) {
         if (other == null) {
             throw new IllegalArgumentException("other must not be null");
@@ -178,6 +228,7 @@ public class UserInfo {
         this.enabled = other.enabled;
     }
 
+    /** Crée un profil vide pour construction progressive ou désérialisation Jackson. */
     public UserInfo() {
 
     }
