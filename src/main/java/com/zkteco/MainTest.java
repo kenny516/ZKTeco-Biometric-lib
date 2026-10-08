@@ -44,23 +44,22 @@ public class MainTest {
             // 2. Exporter un utilisateur avec ses informations et ses templates
             // d'empreinte.
             // Sans sélection : essayer tous les indices de doigt, de 0 à 9.
-            /*
-             * UserBiometricData userData = terminal.getUserWithFingerprints(userId);
-             * Files.createDirectories(backupFile.toAbsolutePath().getParent());
-             * json.writerWithDefaultPrettyPrinter().writeValue(backupFile.toFile(),
-             * userData);
-             * System.out.println("Sauvegarde : " + backupFile.toAbsolutePath());
-             * System.out.println("Empreintes récupérées : " +
-             * userData.getFingerprints().size());
-             * for (FingerprintTemplate fingerprint : userData.getFingerprints()) {
-             * System.out.println("Doigt " + fingerprint.getFingerIndex() + " : " +
-             * fingerprint.getSize() + " octets");
-             * }
-             * if (!userData.isComplete()) {
-             * // System.out.println("Erreurs de lecture : " +
-             * // userData.getFingerprintReadErrors());
-             * }
-             */
+
+            UserBiometricData userData = terminal.getUserWithFingerprints(userId);
+            Files.createDirectories(backupFile.toAbsolutePath().getParent());
+            json.writerWithDefaultPrettyPrinter().writeValue(backupFile.toFile(),
+                    userData);
+            System.out.println("Sauvegarde : " + backupFile.toAbsolutePath());
+            System.out.println("Empreintes récupérées : " +
+                    userData.getFingerprints().size());
+            for (FingerprintTemplate fingerprint : userData.getFingerprints()) {
+                System.out.println("Doigt " + fingerprint.getFingerIndex() + " : " +
+                        fingerprint.getSize() + " octets");
+            }
+            if (!userData.isComplete()) {
+                System.out.println("Erreurs de lecture : " +
+                        userData.getFingerprintReadErrors());
+            }
 
             // 3. Supprimer cet utilisateur puis le réajouter depuis le JSON.
             if (deleteAndRestore) {
