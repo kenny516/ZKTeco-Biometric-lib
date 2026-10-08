@@ -25,6 +25,25 @@ import java.util.List;
 
 public class ZKTerminalFingerprintReadTest {
     @Test
+    public void decodesUserRecordSplitAcrossPacketsWithoutSkippingSecondPayload() throws Exception {
+        byte[] record = new UserRecordCodec(StandardCharsets.UTF_8).encode(
+                new UserInfo(64, "EMP1", "Alice", "", UserRoleEnum.USER_DEFAULT, 0));
+        int[] first = new int[34];
+        first[0] = 72;
+        for (int i = 0; i < 30; i++) { first[i + 4] = record[i] & 255; }
+        int[] second = new int[42];
+        for (int i = 0; i < second.length; i++) { second[i] = record[i + 30] & 255; }
+        try (Fixture fixture = new Fixture(packet(1500, 76, 0, 0, 0), packet(1501, first),
+                packet(1501, second), packet(2000))) {
+            List<UserInfo> users = fixture.terminal.getAllUsers();
+            assertEquals(1, users.size());
+            assertEquals("EMP1", users.get(0).getUserid());
+            assertEquals("Alice", users.get(0).getName());
+            assertTrue(fixture.terminal.responses.isEmpty());
+        }
+    }
+
+    @Test
     public void consumesFinalUserTransferAcknowledgementBeforeReadingFingerprint() throws Exception {
         byte[] userBytes = new UserRecordCodec(StandardCharsets.UTF_8).encode(
                 new UserInfo(64, "EMP1", "Alice", "", UserRoleEnum.USER_DEFAULT, 0));

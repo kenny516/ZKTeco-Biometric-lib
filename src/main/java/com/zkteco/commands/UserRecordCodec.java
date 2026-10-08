@@ -4,7 +4,6 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 
 import com.zkteco.Enum.UserRoleEnum;
 
@@ -25,6 +24,12 @@ public final class UserRecordCodec {
         this.nameCharset = nameCharset;
     }
 
+    /**
+     * Encode un profil moderne après validation de ses champs.
+     * @param user profil avec un UID de 1 à 65535
+     * @return enregistrement de 72 octets en little-endian
+     * @throws IllegalArgumentException si les champs dépassent les limites du format
+     */
     public byte[] encode(UserInfo user) {
         validate(user, true);
         ByteBuffer buffer = ByteBuffer.allocate(RECORD_SIZE).order(ByteOrder.LITTLE_ENDIAN);
@@ -42,6 +47,12 @@ public final class UserRecordCodec {
         return buffer.array();
     }
 
+    /**
+     * Décode le prochain profil et avance la position du buffer de 72 octets.
+     * @param source buffer contenant au moins un enregistrement complet
+     * @return profil décodé
+     * @throws IllegalArgumentException si le buffer est null ou trop court
+     */
     public UserInfo decode(ByteBuffer source) {
         if (source == null || source.remaining() < RECORD_SIZE) {
             throw new IllegalArgumentException("A complete 72-byte user record is required");
@@ -65,6 +76,14 @@ public final class UserRecordCodec {
         return user;
     }
 
+    /**
+     * Vérifie les limites : userid ASCII 1..9 octets, mot de passe ASCII 0..8,
+     * nom 0..23 octets encodés, carte non signée sur 32 bits et zones sur 16 bits.
+     * @param user profil non null avec un rôle défini
+     * @param requireUid true pour vérifier aussi que l'UID est entre 1 et 65535
+     * @throws IllegalArgumentException si un champ ne respecte pas ces limites
+     * @throws IllegalStateException si la représentation du groupe est invalide
+     */
     public void validate(UserInfo user, boolean requireUid) {
         if (user == null) {
             throw new IllegalArgumentException("user must not be null");
@@ -143,7 +162,7 @@ public final class UserRecordCodec {
         while (end < value.length && value[end] != 0) {
             end++;
         }
-        return new String(Arrays.copyOf(value, end), charset);
+        return new String(value, 0, end, charset);
     }
 
     private static UserRoleEnum decodeRole(int token) {

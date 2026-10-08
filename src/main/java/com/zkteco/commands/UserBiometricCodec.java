@@ -11,6 +11,14 @@ public final class UserBiometricCodec {
 
     public UserBiometricCodec(Charset charset) { userCodec = new UserRecordCodec(charset); }
 
+    /**
+     * Construit le buffer de commande 110 : profil marqué, table UID/doigt/offset,
+     * puis templates précédés de leurs longueurs. N'effectue aucun échange réseau.
+     * @param user profil avec l'UID du lecteur destination
+     * @param fingerprints templates avec des indices distincts, liste vide autorisée
+     * @return buffer little-endian prêt à transférer par morceaux
+     * @throws IllegalArgumentException si le profil ou les templates sont invalides
+     */
     public byte[] encode(UserInfo user, List<FingerprintTemplate> fingerprints) {
         // Also checks duplicate finger indices before producing a device packet.
         UserBiometricData snapshot = new UserBiometricData(user, fingerprints);

@@ -44,6 +44,22 @@ UDP writes, destination UID assignment, and upload failure/cleanup handling.
 They do not require a physical reader. Do not use `MainTest` as an automated
 test: it connects to the configured device and can modify its stored users.
 
+## API Javadoc
+
+Public user/fingerprint APIs and their result objects include Javadoc with parameter
+ranges, return values, failure behavior, examples, and links between related APIs.
+The added comments are in French. IDEs display them when hovering over methods.
+Generate the HTML reference with:
+
+```shell
+mvn javadoc:javadoc
+```
+
+Open `target/site/apidocs/index.html` in a browser. The `release` profile also
+attaches a `-javadoc.jar` to future packaged releases; the existing beta release
+does not yet contain that additional asset. Generation uses the
+[Maven Javadoc Plugin](https://maven.apache.org/plugins/maven-javadoc-plugin/usage.html).
+
 ## Connect to a reader
 
 Configure the device IP, UDP port (usually `4370`), and communication key.
@@ -144,6 +160,9 @@ A failed enrollment does not roll back the saved profile.
 // Attempt all ten slots, collecting every template returned by the reader.
 UserBiometricData data = terminal.getUserWithFingerprints("EMP0001");
 
+// Read all profiles and attempt all ten slots for every user.
+List<UserBiometricData> allUsers = terminal.getAllUserWithFingerprints();
+
 // Alternatively, request only known slots.
 UserBiometricData selected = terminal.getUserWithFingerprints("EMP0001", 1, 6);
 
@@ -155,6 +174,12 @@ for (FingerprintTemplate fingerprint : data.getFingerprints()) {
 // Lower-level API: read one template by INTERNAL UID.
 byte[] template = terminal.getUserFingerprint(data.getUser().getUid(), 1);
 ```
+
+`getAllUserWithFingerprints()` fetches the profile list once and reads templates
+sequentially by each user's internal UID. It returns an empty list if there are
+no users. Each snapshot keeps its own fingerprint read errors. Transport failures
+abort the operation. This can take time on readers with many users, and realtime
+logs must be stopped before calling it.
 
 Reading uses command `88`. It handles a pending empty ACK, direct data, and
 multi-packet transfers. Template reads have a ten-second deadline and restore
@@ -255,11 +280,10 @@ and all readable finger slots, optionally deletes/restores the user from JSON,
 then starts realtime attendance. The listener displays only the user ID and name.
 Press ENTER to stop.
 
-The export block is currently commented out and `deleteAndRestore` is set to
-`true`: the example reads an existing backup and runs the deletion/reimport
-sequence. For listing and realtime only, set `deleteAndRestore = false`. To
-create a fresh backup, uncomment the export block; to export without listening,
-also set `realtime = false`.
+The export block is active, `deleteAndRestore` is set to `true`, and `realtime`
+is set to `false`: the current example creates a fresh backup, then runs the
+deletion/reimport sequence. Set `deleteAndRestore = false` to export without
+deleting the user. Set `realtime = true` to listen for attendance afterward.
 
 ```shell
 mvn compile exec:java "-Dexec.mainClass=com.zkteco.MainTest"
@@ -268,7 +292,7 @@ mvn compile exec:java "-Dexec.mainClass=com.zkteco.MainTest"
 Deletion/reimport requires a nonempty fingerprint list. Read errors on other
 indices do not block it: only the templates present in the JSON will be restored.
 An unread template will not survive deletion merely because its index is recorded
-as an error. The example finds the user's current UID and confirms deletion before
+as an error. The example uses the UID read during the fresh export and confirms deletion before
 reimport. Keep the backup if an operation fails; the sequence is not transactional.
 
 `biometric-backups/` is ignored by Git and survives `mvn clean`. The JSON includes
