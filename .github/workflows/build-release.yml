@@ -21,7 +21,7 @@ jobs:
           distribution: temurin
           java-version: '17'
           cache: maven
-      - name: Test and package library, dependencies and sources
+      - name: Test and package library, dependencies, sources and Javadoc
         run: mvn --batch-mode --no-transfer-progress -P release clean package
       - name: Prepare downloads and checksums
         run: |
@@ -54,7 +54,8 @@ jobs:
         run: |
           printf '%s\n' \
             'Java 8 compatible library. Download the regular JAR for managed dependencies, or the all JAR with dependencies included.' \
-            'These are library JARs, not standalone applications. Source JAR and SHA-256 checksums are included.' \
+            'These are library JARs, not standalone applications. Source JAR, French API Javadoc JAR and SHA-256 checksums are included.' \
+            'Bulk reading is available through getAllUserWithFingerprints(): one profile list request, then up to ten fingerprint reads per user, with per-finger database errors retained in each snapshot.' \
             'Fingerprint import is covered by simulated UDP tests; recognition and firmware compatibility require device validation.' > release-notes.md
           flags=()
           if [[ "$RELEASE_TAG" == *-* ]]; then flags+=(--prerelease); fi
