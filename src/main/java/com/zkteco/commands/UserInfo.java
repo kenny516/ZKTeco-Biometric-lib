@@ -1,6 +1,7 @@
 package com.zkteco.commands;
 
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
@@ -20,16 +21,15 @@ public class UserInfo {
     private int timeZone1;
     private int timeZone2;
     private int timeZone3;
-	private boolean enabled;
+    private boolean enabled = true;
 
-    
     public boolean isEnabled() {
-		return enabled;
-	}
+        return enabled;
+    }
 
-	public void setEnabled(boolean enabled) {
-		this.enabled = enabled;
-	}
+    public void setEnabled(boolean enabled) {
+        this.enabled = enabled;
+    }
 
     public int getUid() {
         return uid;
@@ -87,6 +87,28 @@ public class UserInfo {
         this.groupNumber = groupNumber;
     }
 
+    public int getGroupId() {
+        if (groupNumber == null || groupNumber.trim().isEmpty()) {
+            return 0;
+        }
+        try {
+            int groupId = Integer.parseInt(groupNumber);
+            if (groupId < 0 || groupId > 255) {
+                throw new IllegalStateException("groupNumber must be between 0 and 255");
+            }
+            return groupId;
+        } catch (NumberFormatException e) {
+            throw new IllegalStateException("groupNumber must be numeric", e);
+        }
+    }
+
+    public void setGroupId(int groupId) {
+        if (groupId < 0 || groupId > 255) {
+            throw new IllegalArgumentException("groupId must be between 0 and 255");
+        }
+        this.groupNumber = String.valueOf(groupId);
+    }
+
     public int getUserTimeZoneFlag() {
         return userTimeZoneFlag;
     }
@@ -118,102 +140,89 @@ public class UserInfo {
     public void setTimeZone3(int timeZone3) {
         this.timeZone3 = timeZone3;
     }
-    
-    public UserInfo(int uid,String user_id,String name,String password,UserRoleEnum privilege,long cardno) {
-    	this.userid = user_id;
-    	this.name = name;
-    	this.role = privilege;
-    	this.cardno = cardno;
-    	this.password = password;
-    	this.groupNumber = "0";
-    	this.uid = uid;
+
+    public UserInfo(int uid, String user_id, String name, String password, UserRoleEnum privilege, long cardno) {
+        this.userid = user_id;
+        this.name = name;
+        this.role = privilege;
+        this.cardno = cardno;
+        this.password = password;
+        this.groupNumber = "0";
+        this.uid = uid;
     }
 
-    public UserInfo(String user_id,String name,String password,UserRoleEnum privilege,long cardno) {
-    	this.userid = user_id;
-    	this.name = name;
-    	this.role = privilege;
-    	this.cardno = cardno;
-    	this.password = password;
-    	this.groupNumber = "0";
+    public UserInfo(String user_id, String name, String password, UserRoleEnum privilege, long cardno) {
+        this.userid = user_id;
+        this.name = name;
+        this.role = privilege;
+        this.cardno = cardno;
+        this.password = password;
+        this.groupNumber = "0";
     }
-    
-   public UserInfo() {
-    	
+
+    public UserInfo(UserInfo other) {
+        if (other == null) {
+            throw new IllegalArgumentException("other must not be null");
+        }
+        this.uid = other.uid;
+        this.role = other.role;
+        this.password = other.password;
+        this.name = other.name;
+        this.cardno = other.cardno;
+        this.userid = other.userid;
+        this.groupNumber = other.groupNumber;
+        this.userTimeZoneFlag = other.userTimeZoneFlag;
+        this.timeZone1 = other.timeZone1;
+        this.timeZone2 = other.timeZone2;
+        this.timeZone3 = other.timeZone3;
+        this.enabled = other.enabled;
+    }
+
+    public UserInfo() {
+
     }
 
     public static UserInfo encodeUser(ByteBuffer buffer, int userPacketSize) {
-//        System.out.println(buffer.position());
-    	UserInfo user = new UserInfo();
-
-        byte permissionToken = buffer.get(2);
-        int roleBits = (permissionToken >> 1) & 0x07; // Bits 3-1
-        int userStateBit = permissionToken & 0x01; // Bit 0
-
-        switch (roleBits) {
-            case 0b000:
-                user.setRole(UserRoleEnum.USER_DEFAULT);
-                break;
-            case 0b001:
-                user.setRole(UserRoleEnum.USER_ENROLLER);
-                break;
-            case 0b011:
-                user.setRole(UserRoleEnum.USER_MANAGER);
-                break;
-            case 0b111:
-                user.setRole(UserRoleEnum.USER_ADMIN);
-                break;
-            default:
-            	user.setRole(UserRoleEnum.USER_DEFAULT);
-                break;
+        if (userPacketSize != UserRecordCodec.RECORD_SIZE) {
+            throw new IllegalArgumentException("Only 72-byte user records are supported");
         }
-
-        user.setEnabled(userStateBit == 0);
-
-        byte[] data = new byte[userPacketSize];
-        buffer.get(data);
-        
-        byte[] passwordByte = Arrays.copyOfRange(data, 3, 12);
-        byte[] nameByte = Arrays.copyOfRange(data, 11, 35);
-        byte[] userIdByte = Arrays.copyOfRange(data, 48, 57);
-        byte[] pattern = new byte[]{0x00};
-        
-        passwordByte = split(pattern, passwordByte).get(0);
-        nameByte = split(pattern, nameByte).get(0);
-
-        user.setUid(Short.reverseBytes(buffer.getShort(0)));
-        user.setPassword(new String(passwordByte));
-        user.setName(new String(nameByte).trim());
-        user.setCardno(Integer.reverseBytes(buffer.getInt(35)));
-        user.setGroupNumber(String.valueOf(buffer.get(38)));
-        user.setUserTimeZoneFlag(Short.reverseBytes(buffer.getShort(40)));
-        user.setTimeZone1(Short.reverseBytes(buffer.getShort(42)));
-        user.setTimeZone2(Short.reverseBytes(buffer.getShort(44)));
-        user.setTimeZone3(Short.reverseBytes(buffer.getShort(46)));
-        user.setUserid(new String(userIdByte));
-        return user;
+        return new UserRecordCodec(StandardCharsets.UTF_8).decode(buffer);
     }
 
-		public static List<byte[]> split(byte[] pattern, byte[] input) {
-		    List<byte[]> l = new LinkedList<byte[]>();
-		    int blockStart = 0;
-		    for(int i=0; i<input.length; i++) {
-		       if(isMatch(pattern,input,i)) {
-		          l.add(Arrays.copyOfRange(input, blockStart, i));
-		          blockStart = i+pattern.length;
-		          i = blockStart;
-		       }
-		    }
-		    l.add(Arrays.copyOfRange(input, blockStart, input.length ));
-		    return l;
-		}
-		
-		public static boolean isMatch(byte[] pattern, byte[] input, int pos) {
-		    for(int i=0; i< pattern.length; i++) {
-		        if(pattern[i] != input[pos+i]) {
-		            return false;
-		        }
-		    }
-		    return true;
-		}
+    /**
+     * @deprecated Retained for source compatibility; not needed by the user codec.
+     */
+    @Deprecated
+    public static List<byte[]> split(byte[] pattern, byte[] input) {
+        if (pattern == null || pattern.length == 0 || input == null) {
+            throw new IllegalArgumentException("pattern and input must be non-null, and pattern must not be empty");
+        }
+        List<byte[]> result = new LinkedList<byte[]>();
+        int blockStart = 0;
+        for (int i = 0; i <= input.length - pattern.length; i++) {
+            if (isMatch(pattern, input, i)) {
+                result.add(Arrays.copyOfRange(input, blockStart, i));
+                blockStart = i + pattern.length;
+                i = blockStart - 1;
+            }
+        }
+        result.add(Arrays.copyOfRange(input, blockStart, input.length));
+        return result;
+    }
+
+    /**
+     * @deprecated Retained for source compatibility; not needed by the user codec.
+     */
+    @Deprecated
+    public static boolean isMatch(byte[] pattern, byte[] input, int pos) {
+        if (pattern == null || input == null || pos < 0 || pos + pattern.length > input.length) {
+            return false;
+        }
+        for (int i = 0; i < pattern.length; i++) {
+            if (pattern[i] != input[pos + i]) {
+                return false;
+            }
+        }
+        return true;
+    }
 }

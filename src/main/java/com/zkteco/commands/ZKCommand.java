@@ -10,11 +10,15 @@ public class ZKCommand {
     public final static int[] PACKET_START = {0x50, 0x50, 0x82, 0x7d};
 
     public static int[] getPacket(CommandCodeEnum commandCode, int sessionId, int replyNumber, int[] data) {
+        return getPacket(commandCode.getCode(), sessionId, replyNumber, data);
+    }
+
+    public static int[] getPacket(int commandCode, int sessionId, int replyNumber, int[] data) {
         int[] payloadForChecksum = new int[6 + (data == null ? 0 : data.length)];
         int[] finalPayload = new int[8 + (data == null ? 0 : data.length)];
 //        int[] finalPacket = new int[8 + finalPayload.length];
 
-        byte[] commandBytes = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(commandCode.getCode()).array();
+        byte[] commandBytes = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(commandCode).array();
         byte[] sessionIdBytes = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(sessionId).array();
         byte[] replyNumberBytes = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(replyNumber).array();
 

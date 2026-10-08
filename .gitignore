@@ -12,6 +12,7 @@
 
 # Ignore build output
 target/
+biometric-backups/
 out/
 # Ignore log files
 *.log
