@@ -1,0 +1,66 @@
+name: Build and release JARs
+
+on:
+  push:
+    branches: [main, dev]
+    tags: ['v*']
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Test and package library, dependencies and sources
+        run: mvn --batch-mode --no-transfer-progress -P release clean package
+      - name: Prepare downloads and checksums
+        run: |
+          mkdir -p dist
+          cp target/*.jar dist/
+          cd dist
+          sha256sum *.jar > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zkteco-jars
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: zkteco-jars
+          path: dist
+      - name: Publish GitHub release downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          printf '%s\n' \
+            'Java 8 compatible library. Download the regular JAR for managed dependencies, or the all JAR with dependencies included.' \
+            'These are library JARs, not standalone applications. Source JAR and SHA-256 checksums are included.' \
+            'Fingerprint import is covered by simulated UDP tests; recognition and firmware compatibility require device validation.' > release-notes.md
+          flags=()
+          if [[ "$RELEASE_TAG" == *-* ]]; then flags+=(--prerelease); fi
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/* --clobber
+          else
+            gh release create "$RELEASE_TAG" dist/* --verify-tag \
+              --title "ZKTeco Java library $RELEASE_TAG" --notes-file release-notes.md "${flags[@]}"
+          fi

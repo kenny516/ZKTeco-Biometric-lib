@@ -10,6 +10,28 @@ Device and firmware compatibility must be verified on the reader being used.
 
 ## Build and test
 
+Download packaged builds from [GitHub Releases](https://github.com/kenny516/ZKTeco-Biometric-lib/releases).
+The initial release is `v1.0.0-beta.1`.
+
+| Download | Use |
+| --- | --- |
+| `ZKTeco4J-1.0.0-beta.1.jar` | Library classes; supply the runtime dependencies from `pom.xml`. |
+| `ZKTeco4J-1.0.0-beta.1-all.jar` | Library with runtime dependencies included, convenient for a manually configured Java classpath. |
+| `ZKTeco4J-1.0.0-beta.1-sources.jar` | Sources for IDE navigation/debugging. |
+| `SHA256SUMS.txt` | Checksums for the three JARs. |
+
+These are library JARs, without an application entry point for `java -jar`.
+Add the library to your application's classpath. To create the same downloads locally:
+
+```shell
+mvn -P release package
+```
+
+GitHub Actions runs tests and packages downloadable build artifacts on pushes to
+`dev`/`main` and pull requests. Pushing a `v*` tag also publishes the JARs and
+checksums as release assets; tags containing a hyphen are marked as prereleases.
+The workflow can also be run manually for build artifacts.
+
 The project targets Java 8 and uses Maven.
 
 ```shell
