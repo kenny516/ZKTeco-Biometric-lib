@@ -59,6 +59,17 @@ import com.zkteco.commands.ZKCommandReply;
 import com.zkteco.utils.HexUtils;
 import com.zkteco.utils.SecurityUtils;
 
+/**
+ * Client UDP pour un lecteur ZKTeco : profils, empreintes et pointages.
+ * <p>Ouvrir une session avec {@link #connect()}, vérifier sa réponse et, si le lecteur
+ * demande une authentification, appeler {@link #connectAuth(int)}. Fermer la session
+ * avec {@link #disconnect()} dans un bloc {@code finally}.
+ * <p>Le socket est partagé par les commandes et le listener temps réel. Ne pas lancer
+ * de commandes depuis le callback de {@link #startRealTimeLogs(java.util.function.Consumer)}.
+ * Les opérations biométriques sont sérialisées entre elles, mais ce client ne garantit
+ * pas la sécurité de toutes les commandes lors d'appels concurrents.
+ * @see UserBiometricData
+ */
 public class ZKTerminal {
 
     private DatagramSocket socket;
@@ -79,10 +90,23 @@ public class ZKTerminal {
     private volatile boolean realtimeRunning = false;
     private Thread realtimeThread;
 
+    /**
+     * Prépare un client, sans ouvrir de connexion, avec des noms encodés en UTF-8.
+     * @param ip adresse IP ou nom d'hôte du lecteur
+     * @param port port UDP du lecteur, généralement 4370
+     */
     public ZKTerminal(String ip, int port) {
         this(ip, port, StandardCharsets.UTF_8);
     }
 
+    /**
+     * Prépare un client avec l'encodage des noms utilisé par le firmware.
+     * Les identifiants et mots de passe restent en ASCII.
+     * @param ip adresse du lecteur
+     * @param port port UDP
+     * @param userCharset encodage des noms, non null
+     * @throws IllegalArgumentException si l'encodage est null
+     */
     public ZKTerminal(String ip, int port, Charset userCharset) {
         if (userCharset == null) {
             throw new IllegalArgumentException("userCharset must not be null");
@@ -93,7 +117,13 @@ public class ZKTerminal {
         this.userBiometricCodec = new UserBiometricCodec(userCharset);
     }
 
-    // Connect to devices
+    /**
+     * Vérifie la joignabilité par ping, ouvre le socket et demande une session.
+     * @return réponse du lecteur ; {@code CMD_ACK_UNAUTH} demande une authentification
+     * @throws IOException si l'ouverture ou l'échange UDP échoue
+     * @throws DeviceNotConnectException si le ping échoue
+     * @see #connectAuth(int)
+     */
     public ZKCommandReply connect() throws IOException, DeviceNotConnectException {
         if (!testPing()) {
             throw new DeviceNotConnectException("Device Not connect...!");
@@ -141,7 +171,11 @@ public class ZKTerminal {
         }
     }
 
-    // Disconnect Devices to this Application
+    /**
+     * Envoie la commande de fin de session et ferme le socket.
+     * @throws IOException si l'envoi échoue
+     * @see #stopRealTimeLogs()
+     */
     public void disconnect() throws IOException {
         int[] toSend = ZKCommand.getPacket(CommandCodeEnum.CMD_EXIT, sessionId, replyNo, null);
         byte[] buf = new byte[toSend.length];
@@ -163,6 +197,11 @@ public class ZKTerminal {
     }
 
     // Enable devices
+    /**
+     * Demande la réactivation du lecteur pour les vérifications normales.
+     * @return réponse du lecteur ; vérifier {@code CMD_ACK_OK}
+     * @throws IOException si l'échange UDP échoue
+     */
     public ZKCommandReply enableDevice() throws IOException {
         int[] toSend = ZKCommand.getPacket(CommandCodeEnum.CMD_ENABLEDEVICE, sessionId, replyNo, null);
         byte[] buf = new byte[toSend.length];
@@ -183,6 +222,12 @@ public class ZKTerminal {
     }
 
     // disable devices
+    /**
+     * Demande la désactivation des vérifications pendant une modification de données.
+     * Réactiver le lecteur dans un bloc {@code finally} après une réponse positive.
+     * @return réponse du lecteur ; vérifier {@code CMD_ACK_OK}
+     * @throws IOException si l'échange UDP échoue
+     */
     public ZKCommandReply disableDevice() throws IOException {
         int[] toSend = ZKCommand.getPacket(CommandCodeEnum.CMD_DISABLEDEVICE, sessionId, replyNo, null);
         byte[] buf = new byte[toSend.length];
@@ -202,7 +247,12 @@ public class ZKTerminal {
         return new ZKCommandReply(replyCode, sessionId, replyId, payloads);
     }
 
-    // Devices verification commkey
+    /**
+     * Authentifie la session avec la clé de communication configurée sur le lecteur.
+     * @param comKey clé de communication, différente du Device ID
+     * @return réponse à vérifier : {@code CMD_ACK_OK} indique le succès
+     * @throws IOException si l'échange UDP échoue
+     */
     public ZKCommandReply connectAuth(int comKey) throws IOException {
         int[] key = SecurityUtils.authKey(comKey, sessionId);
         int[] toSend = ZKCommand.getPacket(CommandCodeEnum.CMD_AUTH, sessionId, replyNo, key);
@@ -263,18 +313,17 @@ public class ZKTerminal {
     }
 
     /**
-     * Equivalent of zktecolib-js getRealTimeLogs(callback).
-     * Starts a background listener thread that calls the callback for each realtime
-     * attendance event.
-     * Non-blocking — returns immediately. Use stopRealTimeLogs() to stop.
-     *
-     * Example:
-     * terminal.startRealTimeLogs(record -> {
-     * System.out.println("User: " + record.getUserID() + " at " +
-     * record.getRecordTime());
-     * });
-     * // ... later:
-     * terminal.stopRealTimeLogs();
+     * Abonne le lecteur aux pointages et démarre un listener en arrière-plan.
+     * Retourne immédiatement ; un appel pendant une écoute active ne la redémarre pas.
+     * <p>Charger les profils avant l'écoute pour associer le userid à un nom. Le callback
+     * s'exécute sur le thread du listener et ne doit pas utiliser le socket du terminal.
+     * <pre>{@code
+     * terminal.startRealTimeLogs(record -> System.out.println(record.getUserID()));
+     * // Plus tard : terminal.stopRealTimeLogs();
+     * }</pre>
+     * @param callback consommateur des pointages décodés, non null
+     * @throws IOException si l'abonnement UDP échoue
+     * @see #stopRealTimeLogs()
      */
     public void startRealTimeLogs(java.util.function.Consumer<AttendanceRecord> callback) throws IOException {
         if (realtimeRunning) {
@@ -323,7 +372,9 @@ public class ZKTerminal {
     }
 
     /**
-     * Stops the realtime listener thread started by startRealTimeLogs().
+     * Demande l'arrêt du listener, sans fermer la session ni attendre la fin du thread.
+     * Une réception UDP déjà bloquée peut se terminer au prochain paquet ou timeout.
+     * @see #disconnect()
      */
     public void stopRealTimeLogs() {
         realtimeRunning = false;
@@ -473,6 +524,12 @@ public class ZKTerminal {
     }
 
     // Get all devices Attendance Data
+    /**
+     * Télécharge les pointages enregistrés, sans démarrer de listener temps réel.
+     * @return liste des pointages décodés
+     * @throws IOException si le transfert UDP échoue
+     * @throws ParseException si une date de pointage ne peut être décodée
+     */
     public List<AttendanceRecord> getAttendanceRecords() throws IOException, ParseException {
         int[] toSend = ZKCommand.getPacket(CommandCodeEnum.CMD_ATTLOG_RRQ, sessionId, replyNo, null);
         byte[] buf = new byte[toSend.length];
@@ -1400,10 +1457,6 @@ public class ZKTerminal {
         int replyId = response[6] + (response[7] * 0x100);
         int[] payloads = Arrays.copyOfRange(response, 8, response.length);
 
-        // TODO:
-        if (replyCode == CommandReplyCodeEnum.CMD_ACK_OK) {
-
-        }
 
         return new ZKCommandReply(replyCode, sessionId, replyId, payloads);
     }
@@ -1428,10 +1481,6 @@ public class ZKTerminal {
         int replyId = response[6] + (response[7] * 0x100);
         int[] payloads = Arrays.copyOfRange(response, 8, response.length);
 
-        // TODO:
-        if (replyCode == CommandReplyCodeEnum.CMD_ACK_OK) {
-
-        }
 
         return new ZKCommandReply(replyCode, sessionId, replyId, payloads);
     }
@@ -1456,10 +1505,6 @@ public class ZKTerminal {
         int replyId = response[6] + (response[7] * 0x100);
         int[] payloads = Arrays.copyOfRange(response, 8, response.length);
 
-        // TODO:
-        if (replyCode == CommandReplyCodeEnum.CMD_ACK_OK) {
-
-        }
 
         return new ZKCommandReply(replyCode, sessionId, replyId, payloads);
     }
@@ -1484,10 +1529,6 @@ public class ZKTerminal {
         int replyId = response[6] + (response[7] * 0x100);
         int[] payloads = Arrays.copyOfRange(response, 8, response.length);
 
-        // TODO:
-        if (replyCode == CommandReplyCodeEnum.CMD_ACK_OK) {
-
-        }
 
         return new ZKCommandReply(replyCode, sessionId, replyId, payloads);
     }
@@ -1547,10 +1588,6 @@ public class ZKTerminal {
         int replyId = response[6] + (response[7] * 0x100);
         int[] payloads = Arrays.copyOfRange(response, 8, response.length);
 
-        // TODO:
-        if (replyCode == CommandReplyCodeEnum.CMD_ACK_OK) {
-
-        }
 
         return new ZKCommandReply(replyCode, sessionId, replyId, payloads);
     }
@@ -1575,10 +1612,6 @@ public class ZKTerminal {
         int replyId = response[6] + (response[7] * 0x100);
         int[] payloads = Arrays.copyOfRange(response, 8, response.length);
 
-        // TODO:
-        if (replyCode == CommandReplyCodeEnum.CMD_ACK_OK) {
-
-        }
 
         return new ZKCommandReply(replyCode, sessionId, replyId, payloads);
     }
@@ -1603,10 +1636,6 @@ public class ZKTerminal {
         int replyId = response[6] + (response[7] * 0x100);
         int[] payloads = Arrays.copyOfRange(response, 8, response.length);
 
-        // TODO:
-        if (replyCode == CommandReplyCodeEnum.CMD_ACK_OK) {
-
-        }
 
         return new ZKCommandReply(replyCode, sessionId, replyId, payloads);
     }
@@ -1631,10 +1660,6 @@ public class ZKTerminal {
         int replyId = response[6] + (response[7] * 0x100);
         int[] payloads = Arrays.copyOfRange(response, 8, response.length);
 
-        // TODO:
-        if (replyCode == CommandReplyCodeEnum.CMD_ACK_OK) {
-
-        }
 
         return new ZKCommandReply(replyCode, sessionId, replyId, payloads);
     }
@@ -1659,10 +1684,6 @@ public class ZKTerminal {
         int replyId = response[6] + (response[7] * 0x100);
         int[] payloads = Arrays.copyOfRange(response, 8, response.length);
 
-        // TODO:
-        if (replyCode == CommandReplyCodeEnum.CMD_ACK_OK) {
-
-        }
 
         return new ZKCommandReply(replyCode, sessionId, replyId, payloads);
     }
@@ -1687,10 +1708,6 @@ public class ZKTerminal {
         int replyId = response[6] + (response[7] * 0x100);
         int[] payloads = Arrays.copyOfRange(response, 8, response.length);
 
-        // TODO:
-        if (replyCode == CommandReplyCodeEnum.CMD_ACK_OK) {
-
-        }
 
         return new ZKCommandReply(replyCode, sessionId, replyId, payloads);
     }
@@ -1715,10 +1732,6 @@ public class ZKTerminal {
         int replyId = response[6] + (response[7] * 0x100);
         int[] payloads = Arrays.copyOfRange(response, 8, response.length);
 
-        // TODO:
-        if (replyCode == CommandReplyCodeEnum.CMD_ACK_OK) {
-
-        }
 
         return new ZKCommandReply(replyCode, sessionId, replyId, payloads);
     }
@@ -1743,10 +1756,6 @@ public class ZKTerminal {
         int replyId = response[6] + (response[7] * 0x100);
         int[] payloads = Arrays.copyOfRange(response, 8, response.length);
 
-        // TODO:
-        if (replyCode == CommandReplyCodeEnum.CMD_ACK_OK) {
-
-        }
 
         return new ZKCommandReply(replyCode, sessionId, replyId, payloads);
     }
@@ -1929,74 +1938,56 @@ public class ZKTerminal {
         return "";
     }
 
-    // Get Devices All users Data
+    /**
+     * Lit tous les profils sans récupérer les templates d'empreinte.
+     * @return profils dans l'ordre du lecteur, ou liste vide si aucun utilisateur
+     * @throws IOException si l'échange échoue ou si les données sont incomplètes
+     * @throws ParseException si une opération de lecture sous-jacente ne peut être décodée
+     * @see #getAllUserWithFingerprints()
+     */
     public List<UserInfo> getAllUsers() throws IOException, ParseException {
-        try {
-            int usercount = getDeviceStatus().get("userCount");
-            if (usercount == 0)
-                return Collections.emptyList();
-            int[] toSend = ZKCommand.getPacket(CommandCodeEnum.CMD_USERTEMP_RRQ, sessionId, replyNo, null);
-            byte[] buf = new byte[toSend.length];
-            int index = 0;
-
-            for (int byteToSend : toSend) {
-                buf[index++] = (byte) byteToSend;
-            }
-
-            DatagramPacket packet = new DatagramPacket(buf, buf.length, address, port);
-            socket.send(packet);
-            replyNo++;
-            int[] response = readResponse();
-            CommandReplyCodeEnum replyCode = CommandReplyCodeEnum.decode(response[0] + (response[1] * 0x100));
-
-            StringBuilder userBuffer = new StringBuilder();
-            List<UserInfo> userList = new ArrayList<>();
-            if (replyCode == CommandReplyCodeEnum.CMD_PREPARE_DATA) {
-                boolean first = true;
-                while (true) {
-                    int[] readData = readResponse();
-                    if (readData.length < 8) {
-                        throw new IOException("Malformed user transfer packet");
-                    }
-                    int code = readData[0] | (readData[1] << 8);
-                    if (code == CommandReplyCodeEnum.CMD_ACK_OK.getCode()) {
-                        break; // Consume the final ACK before the next command uses the socket.
-                    }
-                    if (code != CommandReplyCodeEnum.CMD_DATA.getCode() || (first && readData.length < 12)) {
-                        throw new IOException("Unexpected user transfer packet: " + code);
-                    }
-                    String readPacket = HexUtils.bytesToHex(readData);
-                    userBuffer.append(readPacket.substring(first ? 24 : 16));
-                    first = false;
-                }
-
-                String usersHex = userBuffer.toString();
-                byte[] usersData = HexUtils.hexStringToByteArray(usersHex);
-                if (usersData.length % UserRecordCodec.RECORD_SIZE != 0) {
-                    throw new IOException("Incomplete user records");
-                }
-
-                ByteBuffer buffer = ByteBuffer.wrap(usersData);
-
-                while (buffer.remaining() >= 72) {
-                    UserInfo user = userRecordCodec.decode(buffer);
-                    userList.add(user);
-                }
-
-            } else {
-                throw new IOException("User read failed: " + replyCode);
-            }
-
-            int replyId = response[6] + (response[7] * 0x100);
-            int[] payloads = new int[response.length - 8];
-            System.arraycopy(response, 8, payloads, 0, payloads.length);
-
-            return userList;
-
-        } finally {
-
+        if (getDeviceStatus().get("userCount") == 0) {
+            return Collections.emptyList();
         }
-
+        sendPacket(ZKCommand.getPacket(CommandCodeEnum.CMD_USERTEMP_RRQ, sessionId, replyNo, null));
+        replyNo++;
+        int[] response = readResponse();
+        if (response.length < 8) {
+            throw new IOException("Malformed user transfer packet");
+        }
+        CommandReplyCodeEnum replyCode = CommandReplyCodeEnum.decode(response[0] | (response[1] << 8));
+        if (replyCode != CommandReplyCodeEnum.CMD_PREPARE_DATA) {
+            throw new IOException("User read failed: " + replyCode);
+        }
+        ByteArrayOutputStream data = new ByteArrayOutputStream();
+        boolean first = true;
+        while (true) {
+            int[] packet = readResponse();
+            if (packet.length < 8) {
+                throw new IOException("Malformed user transfer packet");
+            }
+            int code = packet[0] | (packet[1] << 8);
+            if (code == CommandReplyCodeEnum.CMD_ACK_OK.getCode()) {
+                break; // Consume the final ACK before the next command uses the socket.
+            }
+            if (code != CommandReplyCodeEnum.CMD_DATA.getCode() || (first && packet.length < 12)) {
+                throw new IOException("Unexpected user transfer packet: " + code);
+            }
+            // The first payload starts with a four-byte length, followed by user records.
+            for (int i = first ? 12 : 8; i < packet.length; i++) {
+                data.write(packet[i]);
+            }
+            first = false;
+        }
+        if (data.size() % UserRecordCodec.RECORD_SIZE != 0) {
+            throw new IOException("Incomplete user records");
+        }
+        ByteBuffer buffer = ByteBuffer.wrap(data.toByteArray());
+        List<UserInfo> users = new ArrayList<UserInfo>();
+        while (buffer.hasRemaining()) {
+            users.add(userRecordCodec.decode(buffer));
+        }
+        return users;
     }
 
     // Get work code
@@ -2106,10 +2097,6 @@ public class ZKTerminal {
         int replyId = response[6] + (response[7] * 0x100);
         int[] payloads = Arrays.copyOfRange(response, 8, response.length);
 
-        // TODO:
-        if (replyCode == CommandReplyCodeEnum.CMD_ACK_OK) {
-
-        }
 
         return new ZKCommandReply(replyCode, sessionId, replyId, payloads);
     }
@@ -2222,15 +2209,18 @@ public class ZKTerminal {
         } catch (ParseException e) {
             throw new RuntimeException(e);
         }
-        // TODO:
-        if (replyCode == CommandReplyCodeEnum.CMD_ACK_OK) {
-
-        }
 
         return new ZKCommandReply(replyCode, sessionId, replyId, payloads);
     }
 
-    // Delete User
+    /**
+     * Supprime un utilisateur par son UID interne sur ce lecteur.
+     * Cette opération ne crée aucune sauvegarde ; exporter le profil/templates avant.
+     * @param delUId UID interne, et non l'identifiant métier {@code userid}
+     * @return réponse positive, ou null si le lecteur refuse la suppression
+     * @throws IOException si l'échange UDP échoue
+     * @see #getUserWithFingerprints(String)
+     */
     public ZKCommandReply delUser(int delUId) throws IOException {
         int[] delUIdArray = new int[] { delUId & 0xFF, (delUId >> 8) & 0xFF };
 
@@ -2265,6 +2255,12 @@ public class ZKTerminal {
     /**
      * Adds a new user or updates the user having the same external user ID.
      * The device UID is allocated automatically for new users.
+     * @param user profil à écrire ; son userid détermine création ou mise à jour
+     * @return UID attribué, statut et réponse du lecteur ; aucun template n'est capturé
+     * @throws IOException si un échange UDP échoue
+     * @throws ParseException si une lecture sous-jacente ne peut être décodée
+     * @throws IllegalArgumentException si le profil ne respecte pas le format du lecteur
+     * @throws IllegalStateException si le listener est actif ou si le userid est ambigu
      */
     public UserWriteResult addUser(UserInfo user) throws IOException, ParseException {
         synchronized (userOperationLock) {
@@ -2275,12 +2271,35 @@ public class ZKTerminal {
         }
     }
 
-    /** Reads all ten finger slots. Device database errors are retained in the snapshot. */
+    /**
+     * Reads all ten finger slots. Device database errors are retained in the
+     * snapshot.
+     * @param userId identifiant métier externe, non vide ; ce n'est pas l'UID interne
+     * @return profil et templates récupérés, avec les erreurs des indices non lus
+     * @throws IOException si le transport ou une commande autre qu'une erreur de base échoue
+     * @throws ParseException si une lecture sous-jacente ne peut être décodée
+     * @throws IllegalArgumentException si l'identifiant est invalide ou introuvable
+     * @throws IllegalStateException si le listener est actif ou si plusieurs profils ont ce userid
+     * @see UserBiometricData#isComplete()
+     */
     public UserBiometricData getUserWithFingerprints(String userId) throws IOException, ParseException {
         return getUserWithFingerprints(userId, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9);
     }
 
-    /** Reads selected finger slots; transport/authentication errors abort the snapshot. */
+    /**
+     * Reads selected finger slots; transport/authentication errors abort the
+     * snapshot.
+     * <pre>{@code
+     * UserBiometricData data = terminal.getUserWithFingerprints("EMP0001", 1, 6);
+     * }</pre>
+     * @param userId identifiant métier externe
+     * @param fingerIndices indices distincts de 0 à 9 ; un tableau vide lit seulement le profil
+     * @return profil et templates récupérés ; les codes 4991/4993 sont conservés par indice
+     * @throws IOException si le transport ou une autre réponse d'erreur empêche la lecture
+     * @throws ParseException si une lecture sous-jacente ne peut être décodée
+     * @throws IllegalArgumentException si les paramètres sont invalides ou le profil introuvable
+     * @throws IllegalStateException si le listener est actif ou le userid est ambigu
+     */
     public UserBiometricData getUserWithFingerprints(String userId, int... fingerIndices)
             throws IOException, ParseException {
         if (userId == null || userId.isEmpty() || fingerIndices == null) {
@@ -2308,26 +2327,65 @@ public class ZKTerminal {
             if (user == null) {
                 throw new IllegalArgumentException("User not found: " + userId);
             }
-            List<FingerprintTemplate> fingerprints = new ArrayList<FingerprintTemplate>();
-            Map<Integer, String> errors = new java.util.LinkedHashMap<Integer, String>();
-            for (int index : fingerIndices) {
-                try {
-                    fingerprints.add(new FingerprintTemplate(index, getUserFingerprint(user.getUid(), index)));
-                } catch (FingerprintReadException e) {
-                    if (e.getReplyCode() != 4991 && e.getReplyCode() != 4993) {
-                        throw e;
-                    }
-                    // 4993 does not prove absence. Preserve it instead of silently losing a finger.
-                    errors.put(index, e.getMessage());
-                }
-            }
-            return new UserBiometricData(user, fingerprints, errors);
+            return readUserFingerprintsLocked(user, fingerIndices);
         }
     }
 
     /**
-     * Adds/updates the profile by external userid and uploads supplied templates with command 110.
-     * The source UID is ignored. Unspecified fingers are not deleted. This is not transactional.
+     * Reads every user profile and attempts all ten finger slots for each user.
+     * Fetches the profile list once; database errors are retained per user/finger.
+     * Transport and other device errors abort the operation. Stop realtime first.
+     * @return profils enrichis, ou liste vide ; jusqu'à dix lectures d'empreinte par profil
+     * @throws IOException si un échange échoue ; aucune liste partielle n'est retournée
+     * @throws ParseException si une lecture sous-jacente ne peut être décodée
+     * @throws IllegalStateException si le listener temps réel est actif
+     */
+    public List<UserBiometricData> getAllUserWithFingerprints() throws IOException, ParseException {
+        synchronized (userOperationLock) {
+            if (realtimeRunning) {
+                throw new IllegalStateException("Stop realtime logs before reading user biometrics");
+            }
+            List<UserBiometricData> result = new ArrayList<UserBiometricData>();
+            int[] fingerIndices = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+            for (UserInfo user : getAllUsers()) {
+                result.add(readUserFingerprintsLocked(user, fingerIndices));
+            }
+            return result;
+        }
+    }
+
+    private UserBiometricData readUserFingerprintsLocked(UserInfo user, int[] fingerIndices) throws IOException {
+        List<FingerprintTemplate> fingerprints = new ArrayList<FingerprintTemplate>();
+        Map<Integer, String> errors = new java.util.LinkedHashMap<Integer, String>();
+        for (int index : fingerIndices) {
+            try {
+                fingerprints.add(new FingerprintTemplate(index, getUserFingerprint(user.getUid(), index)));
+            } catch (FingerprintReadException e) {
+                if (e.getReplyCode() != 4991 && e.getReplyCode() != 4993) {
+                    throw e;
+                }
+                // 4993 does not prove absence. Preserve it instead of silently losing a finger.
+                errors.put(index, e.getMessage());
+            }
+        }
+        return new UserBiometricData(user, fingerprints, errors);
+    }
+
+    /**
+     * Adds/updates the profile by external userid and uploads supplied templates
+     * with command 110.
+     * The source UID is ignored. Unspecified fingers are not deleted. This is not
+     * transactional.
+     * <p>Le userid détermine l'utilisateur destination. L'UID de la sauvegarde est ignoré.
+     * Les erreurs de lecture du snapshot ne sont pas envoyées. Un profil peut rester
+     * enregistré après un échec d'import ; le succès ne garantit pas la reconnaissance physique.
+     * @param data profil et templates déjà capturés, non null ; liste vide autorisée
+     * @return résultat du profil, de l'import et du nettoyage du lecteur
+     * @throws IOException si un échange hors de la phase d'import gérée par le résultat échoue
+     * @throws ParseException si une lecture sous-jacente ne peut être décodée
+     * @throws IllegalArgumentException si les données ne respectent pas le format du lecteur
+     * @throws IllegalStateException si le listener est actif ou le userid est ambigu
+     * @see #addUserWithFingerprint(UserInfo, int, Duration)
      */
     public UserBiometricWriteResult addUserWithFingerprints(UserBiometricData data)
             throws IOException, ParseException {
@@ -2339,7 +2397,6 @@ public class ZKTerminal {
                 throw new IllegalStateException("Stop realtime logs before writing user biometrics");
             }
             UserInfo user = data.getUser();
-            userRecordCodec.validate(user, false);
             // Validate the buffered representation before any device write.
             user.setUid(1);
             userBiometricCodec.encode(user, data.getFingerprints());
@@ -2354,10 +2411,11 @@ public class ZKTerminal {
             byte[] buffer = userBiometricCodec.encode(user, data.getFingerprints());
             ZKCommandReply disableReply = disableDevice();
             if (!isSuccess(disableReply)) {
-                return new UserBiometricWriteResult(profile, false, "Profile saved; device refused template write mode");
+                return new UserBiometricWriteResult(profile, false,
+                        "Profile saved; device refused template write mode");
             }
             UserBiometricWriteResult result;
-            String cleanupError = null;
+            List<String> cleanupErrors = new ArrayList<String>();
             try {
                 uploadFingerprintBuffer(buffer);
                 sendBiometricCommand(CommandCodeEnum._CMD_SAVE_USERTEMPS,
@@ -2378,19 +2436,19 @@ public class ZKTerminal {
                 try {
                     sendBiometricCommand(CommandCodeEnum.CMD_FREE_DATA, null);
                 } catch (IOException e) {
-                    cleanupError = "Buffer cleanup failed: " + e.getMessage();
+                    cleanupErrors.add("Buffer cleanup failed: " + e.getMessage());
                 }
                 try {
                     if (!isSuccess(enableDevice())) {
-                        cleanupError = (cleanupError == null ? "" : cleanupError + "; ") + "Device re-enable refused";
+                        cleanupErrors.add("Device re-enable refused");
                     }
                 } catch (IOException e) {
-                    cleanupError = (cleanupError == null ? "" : cleanupError + "; ") + "Device re-enable failed: " + e.getMessage();
+                    cleanupErrors.add("Device re-enable failed: " + e.getMessage());
                 }
             }
-            if (cleanupError != null) {
+            if (!cleanupErrors.isEmpty()) {
                 return new UserBiometricWriteResult(profile, result.isFingerprintsWritten(),
-                        result.getMessage() + "; " + cleanupError, false);
+                        result.getMessage() + "; " + String.join("; ", cleanupErrors), false);
             }
             return result;
         }
@@ -2422,13 +2480,34 @@ public class ZKTerminal {
         }
     }
 
-    /** Adds or updates a user and waits up to 60 seconds for fingerprint enrollment. */
+    /**
+     * Adds or updates a user and waits up to 60 seconds for fingerprint enrollment.
+     * @param user profil de l'utilisateur
+     * @param fingerIndex index de 0 à 9 dont le template existant sera remplacé
+     * @return résultat du profil puis de la capture physique
+     * @throws IOException si un échange UDP échoue
+     * @throws ParseException si une lecture sous-jacente ne peut être décodée
+     * @throws IllegalArgumentException si le profil ou l'indice est invalide
+     * @throws IllegalStateException si le listener est actif ou le userid est ambigu
+     */
     public UserEnrollmentResult addUserWithFingerprint(UserInfo user, int fingerIndex)
             throws IOException, ParseException {
         return addUserWithFingerprint(user, fingerIndex, DEFAULT_ENROLLMENT_TIMEOUT);
     }
 
-    /** Adds or updates a user and waits for the physical fingerprint enrollment. */
+    /**
+     * Écrit le profil puis attend une capture physique sur le lecteur.
+     * Le profil reste enregistré si la capture échoue. Les octets du template ne sont
+     * pas inclus dans le résultat ; les lire ensuite avec {@link #getUserWithFingerprints(String, int...)}.
+     * @param user profil à créer ou mettre à jour
+     * @param fingerIndex index de 0 à 9 ; le template existant à cet index est remplacé
+     * @param timeout délai positif d'attente des événements de capture, hors préparation des commandes
+     * @return résultat du profil et capture, timeout ou annulation
+     * @throws IOException si un échange UDP échoue
+     * @throws ParseException si une lecture sous-jacente ne peut être décodée
+     * @throws IllegalArgumentException si le profil, l'indice ou le délai est invalide
+     * @throws IllegalStateException si le listener est actif ou le userid est ambigu
+     */
     public UserEnrollmentResult addUserWithFingerprint(UserInfo user, int fingerIndex, Duration timeout)
             throws IOException, ParseException {
         if (fingerIndex < 0 || fingerIndex > 9) {
@@ -2455,19 +2534,18 @@ public class ZKTerminal {
     private UserWriteResult addUserLocked(UserInfo requestedUser) throws IOException, ParseException {
         userRecordCodec.validate(requestedUser, false);
         List<UserInfo> users = getAllUsers();
-        List<UserInfo> matchingUsers = new ArrayList<UserInfo>();
+        UserInfo existingUser = null;
         Set<Integer> usedUids = new HashSet<Integer>();
         for (UserInfo existing : users) {
             usedUids.add(existing.getUid());
             if (requestedUser.getUserid().equals(existing.getUserid())) {
-                matchingUsers.add(existing);
+                if (existingUser != null) {
+                    throw new IllegalStateException("Multiple users have userid " + requestedUser.getUserid());
+                }
+                existingUser = existing;
             }
         }
-        if (matchingUsers.size() > 1) {
-            throw new IllegalStateException("Multiple users have userid " + requestedUser.getUserid());
-        }
-
-        boolean created = matchingUsers.isEmpty();
+        boolean created = existingUser == null;
         int assignedUid;
         if (created) {
             Map<String, Integer> status = getDeviceStatus();
@@ -2478,7 +2556,7 @@ public class ZKTerminal {
             }
             assignedUid = firstFreeUid(usedUids);
         } else {
-            assignedUid = matchingUsers.get(0).getUid();
+            assignedUid = existingUser.getUid();
         }
 
         UserInfo normalizedUser = new UserInfo(requestedUser);
@@ -2535,8 +2613,9 @@ public class ZKTerminal {
     }
 
     /**
-     * @deprecated Use {@link #addUser(UserInfo)} to obtain automatic UID allocation,
-     * validation, refresh and a structured result.
+     * @deprecated Use {@link #addUser(UserInfo)} to obtain automatic UID
+     *             allocation,
+     *             validation, refresh and a structured result.
      */
     @Deprecated
     public ZKCommandReply modifyUserInfo(UserInfo newUser) throws IOException {
@@ -2716,7 +2795,8 @@ public class ZKTerminal {
                         "The device refused enrollment events");
             }
 
-            // A missing template may be reported as an error. Replacement can still continue.
+            // A missing template may be reported as an error. Replacement can still
+            // continue.
             cancelEnrollment();
             deleteUserTemplate(uid, fingerIndex);
 
@@ -2851,8 +2931,17 @@ public class ZKTerminal {
 
     /**
      * Reads a fingerprint using experimental command 88 (pyzk get_user_template).
-     * Returns template bytes after removing the device trailer and optional padding.
-     * A rejected command raises IOException; it does not prove that the finger is absent.
+     * Returns template bytes after removing the device trailer and optional
+     * padding.
+     * A rejected command raises IOException; it does not prove that the finger is
+     * absent.
+     * @param uid UID interne du profil sur ce lecteur, de 1 à 65535
+     * @param fingerIndex index du doigt de 0 à 9
+     * @return copie des octets du template, sans trailer/padding de transfert
+     * @throws IOException si le transfert échoue, dépasse dix secondes ou est incomplet
+     * @throws FingerprintReadException si le lecteur retourne une réponse d'erreur
+     * @throws IllegalArgumentException si un indice est hors plage
+     * @throws IllegalStateException si le listener est actif ou le socket n'est pas ouvert
      */
     public byte[] getUserFingerprint(int uid, int fingerIndex) throws IOException {
         if (uid < 1 || uid > 65535 || fingerIndex < 0 || fingerIndex > 9) {
@@ -2919,8 +3008,9 @@ public class ZKTerminal {
                 } else {
                     ErrorCode error = ErrorCode.getByCode(code);
                     String description = error == null ? "Unknown device response" : error.getErrorMessage();
-                    throw new FingerprintReadException(code, "Fingerprint read failed (code " + code + "): " + description
-                            + " [uid=" + uid + ", fingerIndex=" + fingerIndex + "]");
+                    throw new FingerprintReadException(code,
+                            "Fingerprint read failed (code " + code + "): " + description
+                                    + " [uid=" + uid + ", fingerIndex=" + fingerIndex + "]");
                 }
                 byte[] raw = data.toByteArray();
                 if (raw.length <= 1) {
@@ -2978,7 +3068,16 @@ public class ZKTerminal {
                 Arrays.copyOfRange(response, 8, response.length));
     }
 
-    // Starts fingerprint capture and returns the command acknowledgement only.
+    /**
+     * Envoie la commande de démarrage d'une capture, sans attendre son résultat final.
+     * Préférer {@link #addUserWithFingerprint(UserInfo, int, Duration)} pour gérer le cycle complet.
+     * @param uid UID interne valide, vérifié mais non inclus dans le payload de cette commande
+     * @param tempId index du doigt de 0 à 9
+     * @param userId userid ASCII du profil à capturer, de 1 à 24 octets
+     * @return accusé de réception de la commande, pas le résultat de capture
+     * @throws IOException si l'échange UDP échoue
+     * @throws IllegalArgumentException si l'UID, le doigt ou le userid est invalide
+     */
     public ZKCommandReply enrollFinger(int uid, int tempId, String userId) throws IOException {
         if (uid < 1 || uid > 65535) {
             throw new IllegalArgumentException("uid must be between 1 and 65535");
@@ -3109,6 +3208,12 @@ public class ZKTerminal {
     }
 
     // CMD_REFRESHDATA (Not Verified)
+    /**
+     * Demande au lecteur d'actualiser ses données après une écriture.
+     * @return réponse du lecteur ; vérifier {@code CMD_ACK_OK}
+     * @throws IOException si l'échange UDP échoue
+     * @throws ParseException si la réponse ne peut être décodée
+     */
     public ZKCommandReply RefreshData() throws IOException, ParseException {
         int[] toSend = ZKCommand.getPacket(CommandCodeEnum.CMD_REFRESHDATA, sessionId, replyNo, null);
         byte[] buf = new byte[toSend.length];

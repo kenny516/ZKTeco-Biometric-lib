@@ -25,6 +25,53 @@ import com.zkteco.commands.*;
 
 public class ZKTerminalBiometricTest {
     @Test
+    public void readsAllUsersOnceAndAssociatesTemplatesWithTheirProfiles() throws Exception {
+        final int[] calls = { 0, 0 };
+        ZKTerminal terminal = new MockTerminal(4370) {
+            @Override public List<UserInfo> getAllUsers() {
+                calls[0]++;
+                return Arrays.asList(
+                        new UserInfo(2, "EMP1", "Alice", "", UserRoleEnum.USER_DEFAULT, 0),
+                        new UserInfo(7, "EMP2", "Bob", "", UserRoleEnum.USER_DEFAULT, 0));
+            }
+            @Override public byte[] getUserFingerprint(int uid, int index) throws IOException {
+                calls[1]++;
+                if (index != 1 && index != 6) { throw new FingerprintReadException(4993, "Read failed"); }
+                return new byte[] { (byte) uid, (byte) index };
+            }
+        };
+        List<UserBiometricData> users = terminal.getAllUserWithFingerprints();
+        assertEquals(1, calls[0]);
+        assertEquals(20, calls[1]);
+        assertEquals(2, users.size());
+        assertEquals("EMP1", users.get(0).getUser().getUserid());
+        assertEquals("EMP2", users.get(1).getUser().getUserid());
+        for (UserBiometricData data : users) {
+            assertEquals(2, data.getFingerprints().size());
+            assertEquals(8, data.getFingerprintReadErrors().size());
+            assertArrayEquals(new byte[] { (byte) data.getUser().getUid(), 6 }, data.getFingerprints().get(1).getTemplate());
+        }
+    }
+
+    @Test
+    public void returnsEmptyListWhenReaderHasNoUsers() throws Exception {
+        ZKTerminal terminal = new MockTerminal(4370) {
+            @Override public List<UserInfo> getAllUsers() { return Collections.emptyList(); }
+            @Override public byte[] getUserFingerprint(int uid, int index) { throw new AssertionError("No user to read"); }
+        };
+        assertTrue(terminal.getAllUserWithFingerprints().isEmpty());
+    }
+
+    @Test(expected = IOException.class)
+    public void allUsersReadAbortsOnTransportFailure() throws Exception {
+        new MockTerminal(4370) {
+            @Override public byte[] getUserFingerprint(int uid, int index) throws IOException {
+                throw new IOException("Connection lost");
+            }
+        }.getAllUserWithFingerprints();
+    }
+
+    @Test
     public void snapshotKeepsDatabaseErrorsAndSuccessfulFinger() throws Exception {
         MockTerminal terminal = new MockTerminal(4370) {
             @Override public byte[] getUserFingerprint(int uid, int index) throws IOException {
