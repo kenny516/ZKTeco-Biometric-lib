@@ -1,15 +1,19 @@
 package com.zkteco.terminal;
 
 import java.io.IOException;
+import java.io.ByteArrayOutputStream;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.time.Instant;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -17,8 +21,10 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.io.FileWriter;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -29,6 +35,7 @@ import org.apache.commons.lang3.StringUtils;
 import com.zkteco.Enum.OnOffenum;
 import com.zkteco.Exception.DeviceNotConnectException;
 import com.zkteco.command.events.EventCode;
+import com.zkteco.command.events.ErrorCode;
 import com.zkteco.commands.AttendanceRecord;
 import com.zkteco.Enum.AttendanceStateEnum;
 import com.zkteco.Enum.AttendanceTypeEnum;
@@ -37,7 +44,16 @@ import com.zkteco.Enum.CommandReplyCodeEnum;
 import com.zkteco.commands.GetTimeReply;
 import com.zkteco.commands.SmsInfo;
 import com.zkteco.commands.UserInfo;
-import com.zkteco.Enum.UserRoleEnum;
+import com.zkteco.commands.UserRecordCodec;
+import com.zkteco.commands.UserWriteResult;
+import com.zkteco.commands.UserEnrollmentResult;
+import com.zkteco.commands.UserOperationStatus;
+import com.zkteco.commands.FingerprintEnrollmentResult;
+import com.zkteco.commands.FingerprintTemplate;
+import com.zkteco.commands.FingerprintReadException;
+import com.zkteco.commands.UserBiometricData;
+import com.zkteco.commands.UserBiometricWriteResult;
+import com.zkteco.commands.UserBiometricCodec;
 import com.zkteco.commands.ZKCommand;
 import com.zkteco.commands.ZKCommandReply;
 import com.zkteco.utils.HexUtils;
@@ -54,12 +70,27 @@ public class ZKTerminal {
     private int sessionId;
     private int replyNo;
 
+    private static final Duration DEFAULT_ENROLLMENT_TIMEOUT = Duration.ofSeconds(60);
+    private final Object userOperationLock = new Object();
+    private final UserRecordCodec userRecordCodec;
+    private final UserBiometricCodec userBiometricCodec;
+    private int registeredEventMask;
+
     private volatile boolean realtimeRunning = false;
     private Thread realtimeThread;
 
     public ZKTerminal(String ip, int port) {
+        this(ip, port, StandardCharsets.UTF_8);
+    }
+
+    public ZKTerminal(String ip, int port, Charset userCharset) {
+        if (userCharset == null) {
+            throw new IllegalArgumentException("userCharset must not be null");
+        }
         this.ip = ip;
         this.port = port;
+        this.userRecordCodec = new UserRecordCodec(userCharset);
+        this.userBiometricCodec = new UserBiometricCodec(userCharset);
     }
 
     // Connect to devices
@@ -198,6 +229,10 @@ public class ZKTerminal {
         for (EventCode event : events) {
             allEvents = allEvents | event.getCode();
         }
+        return registerRealtimeEvents(allEvents);
+    }
+
+    private ZKCommandReply registerRealtimeEvents(int allEvents) throws IOException {
         String hex = StringUtils.leftPad(Integer.toHexString(allEvents), 8, "0");
         int[] eventReg = new int[4];
         int index = 3;
@@ -214,13 +249,16 @@ public class ZKTerminal {
             buf[index++] = (byte) byteToSend;
         }
         DatagramPacket packet = new DatagramPacket(buf, buf.length, address, port);
-        // socket.setSoTimeout(40000);
         socket.send(packet);
+        replyNo++;
         int[] response = readResponse();
         CommandReplyCodeEnum replyCode = CommandReplyCodeEnum.decode(response[0] + (response[1] * 0x100));
         int replyId = response[6] + (response[7] * 0x100);
         int[] payloads = new int[response.length - 8];
         System.arraycopy(response, 8, payloads, 0, payloads.length);
+        if (replyCode == CommandReplyCodeEnum.CMD_ACK_OK) {
+            registeredEventMask = allEvents;
+        }
         return new ZKCommandReply(replyCode, sessionId, replyId, payloads);
     }
 
@@ -1915,34 +1953,41 @@ public class ZKTerminal {
             List<UserInfo> userList = new ArrayList<>();
             if (replyCode == CommandReplyCodeEnum.CMD_PREPARE_DATA) {
                 boolean first = true;
-                int lastDataRead;
-
-                do {
+                while (true) {
                     int[] readData = readResponse();
-                    lastDataRead = readData.length;
+                    if (readData.length < 8) {
+                        throw new IOException("Malformed user transfer packet");
+                    }
+                    int code = readData[0] | (readData[1] << 8);
+                    if (code == CommandReplyCodeEnum.CMD_ACK_OK.getCode()) {
+                        break; // Consume the final ACK before the next command uses the socket.
+                    }
+                    if (code != CommandReplyCodeEnum.CMD_DATA.getCode() || (first && readData.length < 12)) {
+                        throw new IOException("Unexpected user transfer packet: " + code);
+                    }
                     String readPacket = HexUtils.bytesToHex(readData);
                     userBuffer.append(readPacket.substring(first ? 24 : 16));
                     first = false;
-                } while (lastDataRead == 1032);
+                }
 
                 String usersHex = userBuffer.toString();
                 byte[] usersData = HexUtils.hexStringToByteArray(usersHex);
+                if (usersData.length % UserRecordCodec.RECORD_SIZE != 0) {
+                    throw new IOException("Incomplete user records");
+                }
 
                 ByteBuffer buffer = ByteBuffer.wrap(usersData);
 
                 while (buffer.remaining() >= 72) {
-                    ByteBuffer userBuffer1 = ByteBuffer.allocate(72);
-                    buffer.get(userBuffer1.array());
-                    UserInfo user = UserInfo.encodeUser(userBuffer1, 72);
+                    UserInfo user = userRecordCodec.decode(buffer);
                     userList.add(user);
                 }
 
             } else {
-                System.out.println("Data Fetch failed or null");
+                throw new IOException("User read failed: " + replyCode);
             }
 
             int replyId = response[6] + (response[7] * 0x100);
-            System.out.println(replyId);
             int[] payloads = new int[response.length - 8];
             System.arraycopy(response, 8, payloads, 0, payloads.length);
 
@@ -2217,61 +2262,289 @@ public class ZKTerminal {
         }
     }
 
-    // New Add User
-    public ZKCommandReply modifyUserInfo(UserInfo newUser) throws IOException {
+    /**
+     * Adds a new user or updates the user having the same external user ID.
+     * The device UID is allocated automatically for new users.
+     */
+    public UserWriteResult addUser(UserInfo user) throws IOException, ParseException {
+        synchronized (userOperationLock) {
+            if (realtimeRunning) {
+                throw new IllegalStateException("User writes cannot run while realtime logs are active");
+            }
+            return addUserLocked(user);
+        }
+    }
 
-        int uid = newUser.getUid();
-        String userid = newUser.getUserid();
-        UserRoleEnum role = newUser.getRole();
-        int role1d = role.getRole();
-        String password = newUser.getPassword();
-        String name = newUser.getName();
-        long cardno = newUser.getCardno();
+    /** Reads all ten finger slots. Device database errors are retained in the snapshot. */
+    public UserBiometricData getUserWithFingerprints(String userId) throws IOException, ParseException {
+        return getUserWithFingerprints(userId, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9);
+    }
 
-        // Prepare data for the new user entry
-        ByteBuffer commandBuffer = ByteBuffer.allocate(72).order(ByteOrder.LITTLE_ENDIAN);
+    /** Reads selected finger slots; transport/authentication errors abort the snapshot. */
+    public UserBiometricData getUserWithFingerprints(String userId, int... fingerIndices)
+            throws IOException, ParseException {
+        if (userId == null || userId.isEmpty() || fingerIndices == null) {
+            throw new IllegalArgumentException("userId and fingerIndices are required");
+        }
+        Set<Integer> indices = new HashSet<Integer>();
+        for (int index : fingerIndices) {
+            if (index < 0 || index > 9 || !indices.add(index)) {
+                throw new IllegalArgumentException("fingerIndices must be unique and between 0 and 9");
+            }
+        }
+        synchronized (userOperationLock) {
+            if (realtimeRunning) {
+                throw new IllegalStateException("Stop realtime logs before reading user biometrics");
+            }
+            UserInfo user = null;
+            for (UserInfo candidate : getAllUsers()) {
+                if (userId.equals(candidate.getUserid())) {
+                    if (user != null) {
+                        throw new IllegalStateException("Multiple users have userid " + userId);
+                    }
+                    user = candidate;
+                }
+            }
+            if (user == null) {
+                throw new IllegalArgumentException("User not found: " + userId);
+            }
+            List<FingerprintTemplate> fingerprints = new ArrayList<FingerprintTemplate>();
+            Map<Integer, String> errors = new java.util.LinkedHashMap<Integer, String>();
+            for (int index : fingerIndices) {
+                try {
+                    fingerprints.add(new FingerprintTemplate(index, getUserFingerprint(user.getUid(), index)));
+                } catch (FingerprintReadException e) {
+                    if (e.getReplyCode() != 4991 && e.getReplyCode() != 4993) {
+                        throw e;
+                    }
+                    // 4993 does not prove absence. Preserve it instead of silently losing a finger.
+                    errors.put(index, e.getMessage());
+                }
+            }
+            return new UserBiometricData(user, fingerprints, errors);
+        }
+    }
 
-        commandBuffer.putShort((short) uid);
-        commandBuffer.putShort((short) role1d);
+    /**
+     * Adds/updates the profile by external userid and uploads supplied templates with command 110.
+     * The source UID is ignored. Unspecified fingers are not deleted. This is not transactional.
+     */
+    public UserBiometricWriteResult addUserWithFingerprints(UserBiometricData data)
+            throws IOException, ParseException {
+        if (data == null) {
+            throw new IllegalArgumentException("data must not be null");
+        }
+        synchronized (userOperationLock) {
+            if (realtimeRunning) {
+                throw new IllegalStateException("Stop realtime logs before writing user biometrics");
+            }
+            UserInfo user = data.getUser();
+            userRecordCodec.validate(user, false);
+            // Validate the buffered representation before any device write.
+            user.setUid(1);
+            userBiometricCodec.encode(user, data.getFingerprints());
+            UserWriteResult profile = addUserLocked(user);
+            if (!profile.isSuccess()) {
+                return new UserBiometricWriteResult(profile, false, profile.getMessage());
+            }
+            if (data.getFingerprints().isEmpty()) {
+                return new UserBiometricWriteResult(profile, true, "Profile saved; no fingerprints supplied");
+            }
+            user.setUid(profile.getAssignedUid());
+            byte[] buffer = userBiometricCodec.encode(user, data.getFingerprints());
+            ZKCommandReply disableReply = disableDevice();
+            if (!isSuccess(disableReply)) {
+                return new UserBiometricWriteResult(profile, false, "Profile saved; device refused template write mode");
+            }
+            UserBiometricWriteResult result;
+            String cleanupError = null;
+            try {
+                uploadFingerprintBuffer(buffer);
+                sendBiometricCommand(CommandCodeEnum._CMD_SAVE_USERTEMPS,
+                        ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN)
+                                .putInt(12).putShort((short) 0).putShort((short) 8).array());
+                ZKCommandReply refresh = RefreshData();
+                if (!isSuccess(refresh)) {
+                    result = new UserBiometricWriteResult(profile, false,
+                            "Template upload acknowledged but refresh failed; verify device contents");
+                } else {
+                    result = new UserBiometricWriteResult(profile, true,
+                            "Profile and supplied templates acknowledged by device; verify recognition on reader");
+                }
+            } catch (IOException e) {
+                result = new UserBiometricWriteResult(profile, false,
+                        "Profile saved; template upload failed or is incomplete: " + e.getMessage());
+            } finally {
+                try {
+                    sendBiometricCommand(CommandCodeEnum.CMD_FREE_DATA, null);
+                } catch (IOException e) {
+                    cleanupError = "Buffer cleanup failed: " + e.getMessage();
+                }
+                try {
+                    if (!isSuccess(enableDevice())) {
+                        cleanupError = (cleanupError == null ? "" : cleanupError + "; ") + "Device re-enable refused";
+                    }
+                } catch (IOException e) {
+                    cleanupError = (cleanupError == null ? "" : cleanupError + "; ") + "Device re-enable failed: " + e.getMessage();
+                }
+            }
+            if (cleanupError != null) {
+                return new UserBiometricWriteResult(profile, result.isFingerprintsWritten(),
+                        result.getMessage() + "; " + cleanupError, false);
+            }
+            return result;
+        }
+    }
 
-        byte[] passwordBytes = password.getBytes();
-        commandBuffer.position(3);
-        commandBuffer.put(passwordBytes, 0, Math.min(passwordBytes.length, 8));
+    private void uploadFingerprintBuffer(byte[] buffer) throws IOException {
+        sendBiometricCommand(CommandCodeEnum.CMD_FREE_DATA, null);
+        sendBiometricCommand(CommandCodeEnum.CMD_PREPARE_DATA,
+                ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(buffer.length).array());
+        for (int offset = 0; offset < buffer.length; offset += 1024) {
+            sendBiometricCommand(CommandCodeEnum.CMD_DATA,
+                    Arrays.copyOfRange(buffer, offset, Math.min(buffer.length, offset + 1024)));
+        }
+    }
 
-        byte[] nameBytes = name.getBytes();
-        commandBuffer.position(11);
-        commandBuffer.put(nameBytes, 0, Math.min(nameBytes.length, 24));
+    private void sendBiometricCommand(CommandCodeEnum command, byte[] payload) throws IOException {
+        int previousTimeout = socket.getSoTimeout();
+        try {
+            sendPacket(ZKCommand.getPacketByte(command, sessionId, replyNo, payload));
+            int expectedReply = replyNo++;
+            int[] response = readFingerprintPacket(System.nanoTime() + Duration.ofSeconds(10).toNanos());
+            int code = response[0] | (response[1] << 8);
+            int incomingReply = response[6] | (response[7] << 8);
+            if (code != CommandReplyCodeEnum.CMD_ACK_OK.getCode() || incomingReply != (expectedReply & 0xFFFF)) {
+                throw new IOException("Command " + command + " failed: code=" + code + ", reply=" + incomingReply);
+            }
+        } finally {
+            socket.setSoTimeout(previousTimeout);
+        }
+    }
 
-        commandBuffer.position(35);
-        commandBuffer.putShort((short) cardno);
+    /** Adds or updates a user and waits up to 60 seconds for fingerprint enrollment. */
+    public UserEnrollmentResult addUserWithFingerprint(UserInfo user, int fingerIndex)
+            throws IOException, ParseException {
+        return addUserWithFingerprint(user, fingerIndex, DEFAULT_ENROLLMENT_TIMEOUT);
+    }
 
-        commandBuffer.position(40);
-        commandBuffer.putInt(0);
-
-        byte[] userIdBytes = (userid != null) ? userid.getBytes() : new byte[0];
-        commandBuffer.position(48);
-        commandBuffer.put(userIdBytes, 0, Math.min(userIdBytes.length, 9));
-
-        // SecurityUtils.printHexDump(commandBuffer.array());
-
-        int[] toSend = ZKCommand.getPacketByte(CommandCodeEnum.CMD_USER_WRQ, sessionId, replyNo, commandBuffer.array());
-        byte[] buf = new byte[toSend.length];
-
-        for (int i = 0; i < toSend.length; i++) {
-            buf[i] = (byte) toSend[i];
+    /** Adds or updates a user and waits for the physical fingerprint enrollment. */
+    public UserEnrollmentResult addUserWithFingerprint(UserInfo user, int fingerIndex, Duration timeout)
+            throws IOException, ParseException {
+        if (fingerIndex < 0 || fingerIndex > 9) {
+            throw new IllegalArgumentException("fingerIndex must be between 0 and 9");
+        }
+        if (timeout == null || timeout.isZero() || timeout.isNegative()) {
+            throw new IllegalArgumentException("timeout must be positive");
         }
 
-        DatagramPacket packet = new DatagramPacket(buf, buf.length, address, port);
-        socket.send(packet);
-        replyNo++;
+        synchronized (userOperationLock) {
+            if (realtimeRunning) {
+                throw new IllegalStateException("Fingerprint enrollment cannot run while realtime logs are active");
+            }
+            UserWriteResult profile = addUserLocked(user);
+            if (!profile.isSuccess()) {
+                return new UserEnrollmentResult(profile, null);
+            }
+            FingerprintEnrollmentResult fingerprint = enrollFingerprintLocked(
+                    profile.getAssignedUid(), user.getUserid(), fingerIndex, timeout);
+            return new UserEnrollmentResult(profile, fingerprint);
+        }
+    }
 
+    private UserWriteResult addUserLocked(UserInfo requestedUser) throws IOException, ParseException {
+        userRecordCodec.validate(requestedUser, false);
+        List<UserInfo> users = getAllUsers();
+        List<UserInfo> matchingUsers = new ArrayList<UserInfo>();
+        Set<Integer> usedUids = new HashSet<Integer>();
+        for (UserInfo existing : users) {
+            usedUids.add(existing.getUid());
+            if (requestedUser.getUserid().equals(existing.getUserid())) {
+                matchingUsers.add(existing);
+            }
+        }
+        if (matchingUsers.size() > 1) {
+            throw new IllegalStateException("Multiple users have userid " + requestedUser.getUserid());
+        }
+
+        boolean created = matchingUsers.isEmpty();
+        int assignedUid;
+        if (created) {
+            Map<String, Integer> status = getDeviceStatus();
+            Integer remaining = status.get("remainingUser");
+            if (remaining != null && remaining <= 0) {
+                return new UserWriteResult(0, true, UserOperationStatus.PROFILE_FAILED, null,
+                        "The device has no remaining user capacity");
+            }
+            assignedUid = firstFreeUid(usedUids);
+        } else {
+            assignedUid = matchingUsers.get(0).getUid();
+        }
+
+        UserInfo normalizedUser = new UserInfo(requestedUser);
+        normalizedUser.setUid(assignedUid);
+        userRecordCodec.validate(normalizedUser, true);
+
+        ZKCommandReply disableReply = disableDevice();
+        if (!isSuccess(disableReply)) {
+            return new UserWriteResult(assignedUid, created, UserOperationStatus.PROFILE_FAILED,
+                    disableReply, "The device refused to enter write mode");
+        }
+
+        try {
+            ZKCommandReply writeReply = writeUserRecord(normalizedUser);
+            if (!isSuccess(writeReply)) {
+                return new UserWriteResult(assignedUid, created, UserOperationStatus.PROFILE_FAILED,
+                        writeReply, "The device rejected the user profile");
+            }
+            ZKCommandReply refreshReply = RefreshData();
+            if (!isSuccess(refreshReply)) {
+                return new UserWriteResult(assignedUid, created, UserOperationStatus.PROFILE_FAILED,
+                        refreshReply, "The user was written but the device did not refresh its data");
+            }
+            return new UserWriteResult(assignedUid, created, UserOperationStatus.SUCCESS,
+                    writeReply, created ? "User created" : "User updated");
+        } finally {
+            enableDevice();
+        }
+    }
+
+    static int firstFreeUid(Set<Integer> usedUids) {
+        for (int uid = 1; uid <= 65535; uid++) {
+            if (!usedUids.contains(uid)) {
+                return uid;
+            }
+        }
+        throw new IllegalStateException("No free UID is available on the device");
+    }
+
+    private static boolean isSuccess(ZKCommandReply reply) {
+        return reply != null && reply.getCode() == CommandReplyCodeEnum.CMD_ACK_OK;
+    }
+
+    private ZKCommandReply writeUserRecord(UserInfo user) throws IOException {
+        byte[] record = userRecordCodec.encode(user);
+        int[] toSend = ZKCommand.getPacketByte(CommandCodeEnum.CMD_USER_WRQ, sessionId, replyNo, record);
+        sendPacket(toSend);
+        replyNo++;
         int[] response = readResponse();
         CommandReplyCodeEnum replyCode = CommandReplyCodeEnum.decode(response[0] + (response[1] * 0x100));
+        int replyId = response[6] + (response[7] * 0x100);
+        int[] payloads = Arrays.copyOfRange(response, 8, response.length);
+        return new ZKCommandReply(replyCode, sessionId, replyId, payloads);
+    }
 
-        if (replyCode == CommandReplyCodeEnum.CMD_ACK_OK) {
-            return new ZKCommandReply(replyCode, sessionId, replyNo, null);
-        } else {
-            return null;
+    /**
+     * @deprecated Use {@link #addUser(UserInfo)} to obtain automatic UID allocation,
+     * validation, refresh and a structured result.
+     */
+    @Deprecated
+    public ZKCommandReply modifyUserInfo(UserInfo newUser) throws IOException {
+        synchronized (userOperationLock) {
+            if (realtimeRunning) {
+                throw new IllegalStateException("User writes cannot run while realtime logs are active");
+            }
+            return writeUserRecord(newUser);
         }
     }
 
@@ -2427,50 +2700,317 @@ public class ZKTerminal {
 
     }
 
-    // enrolled user fingerprint capture
-    public ZKCommandReply enrollFinger(int uid, int tempId, String userId) throws IOException {
-        byte[] enroll_dat = new byte[26];
-        Arrays.fill(enroll_dat, (byte) 0);
-        System.arraycopy(userId.getBytes(), 0, enroll_dat, 0, userId.length());
-        enroll_dat[24] = (byte) tempId;
-        enroll_dat[25] = 0x01;
+    private FingerprintEnrollmentResult enrollFingerprintLocked(int uid, String userId, int fingerIndex,
+            Duration timeout) throws IOException {
+        int previousTimeout = socket.getSoTimeout();
+        int previousEventMask = registeredEventMask;
+        List<Integer> scores = new ArrayList<Integer>();
+        boolean enrollmentStarted = false;
+        try {
+            int enrollmentEvents = EventCode.EF_FINGER.getCode()
+                    | EventCode.EF_FPFTR.getCode()
+                    | EventCode.EF_ENROLLFINGER.getCode();
+            ZKCommandReply registration = registerRealtimeEvents(enrollmentEvents);
+            if (!isSuccess(registration)) {
+                return fingerprintFailure(UserOperationStatus.ENROLLMENT_FAILED, fingerIndex, scores,
+                        "The device refused enrollment events");
+            }
 
-        byte[] startEnrollCommand = { 0x61, 0x00, (byte) uid, (byte) (uid >> 8), (byte) tempId, (byte) (tempId >> 8) };
+            // A missing template may be reported as an error. Replacement can still continue.
+            cancelEnrollment();
+            deleteUserTemplate(uid, fingerIndex);
 
-        // Concatenate enroll_dat and startEnrollCommand arrays
-        byte[] combinedArray = new byte[enroll_dat.length + startEnrollCommand.length];
-        System.arraycopy(enroll_dat, 0, combinedArray, 0, enroll_dat.length);
-        System.arraycopy(startEnrollCommand, 0, combinedArray, enroll_dat.length, startEnrollCommand.length);
-        int[] startEnrollPacket = ZKCommand.getPacketByte(CommandCodeEnum.CMD_STARTENROLL, sessionId, replyNo,
-                combinedArray);
-        // sendPacket(startEnrollPacket);
-        byte[] buf = new byte[startEnrollPacket.length];
+            ZKCommandReply startReply = enrollFinger(uid, fingerIndex, userId);
+            if (!isSuccess(startReply)) {
+                return fingerprintFailure(UserOperationStatus.ENROLLMENT_FAILED, fingerIndex, scores,
+                        "The device refused to start fingerprint enrollment");
+            }
+            enrollmentStarted = true;
+            ZKCommandReply verifyReply = setStartVerify();
+            if (!isSuccess(verifyReply)) {
+                return fingerprintFailure(UserOperationStatus.ENROLLMENT_FAILED, fingerIndex, scores,
+                        "The device refused fingerprint capture mode");
+            }
 
-        for (int i = 0; i < startEnrollPacket.length; i++) {
-            buf[i] = (byte) startEnrollPacket[i];
+            long deadline = System.nanoTime() + timeout.toNanos();
+            while (true) {
+                if (Thread.currentThread().isInterrupted()) {
+                    return fingerprintFailure(UserOperationStatus.CANCELLED, fingerIndex, scores,
+                            "Fingerprint enrollment was cancelled");
+                }
+                long remainingNanos = deadline - System.nanoTime();
+                if (remainingNanos <= 0) {
+                    return fingerprintFailure(UserOperationStatus.TIMEOUT, fingerIndex, scores,
+                            "Fingerprint enrollment timed out");
+                }
+                long remainingMillis = Math.max(1L, remainingNanos / 1_000_000L);
+                socket.setSoTimeout((int) Math.min(Integer.MAX_VALUE, remainingMillis));
+
+                int[] response;
+                try {
+                    response = readResponse();
+                } catch (SocketTimeoutException e) {
+                    return fingerprintFailure(UserOperationStatus.TIMEOUT, fingerIndex, scores,
+                            "Fingerprint enrollment timed out");
+                }
+                if (!isRealtimeEvent(response)) {
+                    continue;
+                }
+
+                int eventCode = response[4] + (response[5] << 8);
+                acknowledgeRealtimeEvent(response);
+                if (eventCode == EventCode.EF_FPFTR.getCode() && response.length > 8) {
+                    scores.add(response[8]);
+                } else if (eventCode == EventCode.EF_ENROLLFINGER.getCode()) {
+                    return parseEnrollmentResult(response, userId, fingerIndex, scores);
+                }
+            }
+        } finally {
+            try {
+                socket.setSoTimeout(previousTimeout);
+                if (enrollmentStarted) {
+                    cancelEnrollment();
+                }
+            } catch (IOException | RuntimeException ignored) {
+                // Preserve the actual enrollment result; the device timeout is restored below.
+            }
+            if (enrollmentStarted) {
+                try {
+                    RefreshData();
+                } catch (IOException | ParseException | RuntimeException ignored) {
+                    // The profile remains valid and the enrollment result stays available.
+                }
+            }
+            try {
+                if (registeredEventMask != previousEventMask) {
+                    registerRealtimeEvents(previousEventMask);
+                }
+            } catch (IOException | RuntimeException ignored) {
+                // Best effort restoration of the caller's previous event registration.
+            } finally {
+                socket.setSoTimeout(previousTimeout);
+            }
         }
+    }
 
-        DatagramPacket packet = new DatagramPacket(buf, buf.length, address, port);
-        socket.send(packet);
-        replyNo++;
+    private static FingerprintEnrollmentResult fingerprintFailure(UserOperationStatus status, int fingerIndex,
+            List<Integer> scores, String message) {
+        return new FingerprintEnrollmentResult(status, null, 0, null, fingerIndex, scores, null, message);
+    }
 
+    FingerprintEnrollmentResult parseEnrollmentResult(int[] response, String expectedUserId,
+            int expectedFingerIndex, List<Integer> scores) {
+        if (response.length < 10) {
+            return new FingerprintEnrollmentResult(UserOperationStatus.ENROLLMENT_FAILED, null, 0, null,
+                    expectedFingerIndex, scores, response, "Malformed enrollment result");
+        }
+        int resultCode = response[8] + (response[9] << 8);
+        if (resultCode != 0) {
+            return new FingerprintEnrollmentResult(UserOperationStatus.ENROLLMENT_FAILED, resultCode, 0, null,
+                    expectedFingerIndex, scores, response, "The device rejected the fingerprint samples");
+        }
+        if (response.length < 22) {
+            return new FingerprintEnrollmentResult(UserOperationStatus.ENROLLMENT_FAILED, resultCode, 0, null,
+                    expectedFingerIndex, scores, response, "Incomplete successful enrollment result");
+        }
+        int templateSize = response[10] + (response[11] << 8);
+        int end = 12;
+        while (end < 21 && response[end] != 0) {
+            end++;
+        }
+        byte[] userIdBytes = new byte[end - 12];
+        for (int i = 0; i < userIdBytes.length; i++) {
+            userIdBytes[i] = (byte) response[12 + i];
+        }
+        String enrolledUserId = new String(userIdBytes, StandardCharsets.US_ASCII);
+        int enrolledFingerIndex = response[21];
+        if (!expectedUserId.equals(enrolledUserId) || expectedFingerIndex != enrolledFingerIndex) {
+            return new FingerprintEnrollmentResult(UserOperationStatus.ENROLLMENT_FAILED, resultCode, templateSize,
+                    enrolledUserId, enrolledFingerIndex, scores, response,
+                    "Enrollment result does not match the requested user and finger");
+        }
+        return new FingerprintEnrollmentResult(UserOperationStatus.SUCCESS, resultCode, templateSize,
+                enrolledUserId, enrolledFingerIndex, scores, response, "Fingerprint enrolled");
+    }
+
+    static boolean isRealtimeEvent(int[] response) {
+        if (response == null || response.length < 8) {
+            return false;
+        }
+        int command = response[0] + (response[1] << 8);
+        return command == CommandCodeEnum.CMD_REG_EVENT.getCode()
+                || command == CommandReplyCodeEnum.CMD_ACK_RETRY.getCode();
+    }
+
+    private void acknowledgeRealtimeEvent(int[] response) throws IOException {
+        int incomingReplyId = response[6] + (response[7] << 8);
+        int[] acknowledgement = ZKCommand.getPacket(
+                CommandReplyCodeEnum.CMD_ACK_OK.getCode(), sessionId, incomingReplyId, null);
+        sendPacket(acknowledgement);
+    }
+
+    /**
+     * Reads a fingerprint using experimental command 88 (pyzk get_user_template).
+     * Returns template bytes after removing the device trailer and optional padding.
+     * A rejected command raises IOException; it does not prove that the finger is absent.
+     */
+    public byte[] getUserFingerprint(int uid, int fingerIndex) throws IOException {
+        if (uid < 1 || uid > 65535 || fingerIndex < 0 || fingerIndex > 9) {
+            throw new IllegalArgumentException("uid must be 1..65535 and fingerIndex must be 0..9");
+        }
+        synchronized (userOperationLock) {
+            if (realtimeRunning) {
+                throw new IllegalStateException("Fingerprint reads cannot run while realtime logs are active");
+            }
+            if (socket == null || socket.isClosed()) {
+                throw new IllegalStateException("Connect to the device before reading a fingerprint");
+            }
+            int previousTimeout = socket.getSoTimeout();
+            long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+            try {
+                sendPacket(ZKCommand.getPacket(CommandCodeEnum._CMD_GET_USERTEMP, sessionId, replyNo,
+                        new int[] { uid & 0xFF, (uid >> 8) & 0xFF, fingerIndex }));
+                replyNo++;
+                int[] response = readFingerprintPacket(deadline);
+                int code = response[0] | (response[1] << 8);
+                // An empty ACK may precede the transfer, or remain from a previous read.
+                // It confirms a command; it contains no fingerprint bytes.
+                while (code == CommandReplyCodeEnum.CMD_ACK_OK.getCode() && response.length == 8) {
+                    try {
+                        response = readFingerprintPacket(deadline);
+                    } catch (SocketTimeoutException e) {
+                        throw new SocketTimeoutException(
+                                "CMD_ACK_OK received but no fingerprint data arrived within 10 seconds");
+                    }
+                    code = response[0] | (response[1] << 8);
+                }
+                ByteArrayOutputStream data = new ByteArrayOutputStream();
+                if (code == CommandReplyCodeEnum.CMD_DATA.getCode()) {
+                    appendFingerprintPayload(data, response);
+                } else if (code == CommandReplyCodeEnum.CMD_PREPARE_DATA.getCode()) {
+                    if (response.length < 12) {
+                        throw new IOException("Missing fingerprint transfer size");
+                    }
+                    long size = (response[8] | (response[9] << 8) | (response[10] << 16)
+                            | ((long) response[11] << 24));
+                    if (size < 1 || size > 1024 * 1024) {
+                        throw new IOException("Invalid fingerprint transfer size: " + size);
+                    }
+                    while (true) {
+                        response = readFingerprintPacket(deadline);
+                        code = response[0] | (response[1] << 8);
+                        if (code == CommandReplyCodeEnum.CMD_ACK_OK.getCode()) {
+                            if (data.size() != size) {
+                                throw new IOException("Incomplete fingerprint transfer: " + data.size() + "/" + size);
+                            }
+                            break;
+                        }
+                        if (code != CommandReplyCodeEnum.CMD_DATA.getCode()) {
+                            throw new IOException("Unexpected fingerprint packet: " + code);
+                        }
+                        if ((long) data.size() + response.length - 8 > size) {
+                            throw new IOException("Fingerprint transfer exceeds announced size");
+                        }
+                        appendFingerprintPayload(data, response);
+                    }
+                } else if (code == CommandReplyCodeEnum.CMD_ACK_OK.getCode()) {
+                    throw new IOException("CMD_ACK_OK received with " + (response.length - 8)
+                            + " payload bytes; this fingerprint response format is not supported yet");
+                } else {
+                    ErrorCode error = ErrorCode.getByCode(code);
+                    String description = error == null ? "Unknown device response" : error.getErrorMessage();
+                    throw new FingerprintReadException(code, "Fingerprint read failed (code " + code + "): " + description
+                            + " [uid=" + uid + ", fingerIndex=" + fingerIndex + "]");
+                }
+                byte[] raw = data.toByteArray();
+                if (raw.length <= 1) {
+                    throw new IOException("Empty fingerprint template");
+                }
+                // Matches pyzk: one trailer byte, optionally preceded by six zero bytes.
+                int length = raw.length - 1;
+                if (length >= 6) {
+                    boolean padding = true;
+                    for (int i = length - 6; i < length; i++) {
+                        padding &= raw[i] == 0;
+                    }
+                    if (padding) {
+                        length -= 6;
+                    }
+                }
+                if (length == 0) {
+                    throw new IOException("Empty fingerprint template after removing padding");
+                }
+                return Arrays.copyOf(raw, length);
+            } finally {
+                socket.setSoTimeout(previousTimeout);
+            }
+        }
+    }
+
+    private int[] readFingerprintPacket(long deadline) throws IOException {
+        long remaining = deadline - System.nanoTime();
+        if (remaining <= 0) {
+            throw new SocketTimeoutException("Fingerprint read timed out");
+        }
+        socket.setSoTimeout((int) Math.max(1, remaining / 1_000_000L));
         int[] response = readResponse();
-
-        CommandReplyCodeEnum replyCode = CommandReplyCodeEnum.decode(response[0] + (response[1] * 0x100));
-        int replyId = response[6] + (response[7] * 0x100);
-        int[] payloads = Arrays.copyOfRange(response, 8, response.length);
-
-        // TODO: Add specific logic for CMD_ACK_OK response
-        if (replyCode == CommandReplyCodeEnum.CMD_ACK_OK) {
-            // Log success or perform additional actions if needed
-
-            // return true;
+        if (response.length < 8) {
+            throw new IOException("Malformed fingerprint packet");
         }
+        return response;
+    }
 
-        // Return ZKCommandReply
-        return new ZKCommandReply(replyCode, sessionId, replyId, payloads);
+    private static void appendFingerprintPayload(ByteArrayOutputStream data, int[] response) {
+        for (int i = 8; i < response.length; i++) {
+            data.write(response[i]);
+        }
+    }
 
-        // return false;
+    private ZKCommandReply deleteUserTemplate(int uid, int fingerIndex) throws IOException {
+        int[] data = new int[] { uid & 0xFF, (uid >> 8) & 0xFF, fingerIndex };
+        int[] packet = ZKCommand.getPacket(CommandCodeEnum.CMD_DELETE_USERTEMP, sessionId, replyNo, data);
+        sendPacket(packet);
+        replyNo++;
+        int[] response = readResponse();
+        CommandReplyCodeEnum code = CommandReplyCodeEnum.decode(response[0] + (response[1] << 8));
+        int responseReplyId = response[6] + (response[7] << 8);
+        return new ZKCommandReply(code, sessionId, responseReplyId,
+                Arrays.copyOfRange(response, 8, response.length));
+    }
+
+    // Starts fingerprint capture and returns the command acknowledgement only.
+    public ZKCommandReply enrollFinger(int uid, int tempId, String userId) throws IOException {
+        if (uid < 1 || uid > 65535) {
+            throw new IllegalArgumentException("uid must be between 1 and 65535");
+        }
+        if (tempId < 0 || tempId > 9) {
+            throw new IllegalArgumentException("tempId must be between 0 and 9");
+        }
+        if (userId == null) {
+            throw new IllegalArgumentException("userId must not be null");
+        }
+        for (int i = 0; i < userId.length(); i++) {
+            if (userId.charAt(i) > 0x7F) {
+                throw new IllegalArgumentException("userId must contain ASCII characters only");
+            }
+        }
+        byte[] userIdBytes = userId.getBytes(StandardCharsets.US_ASCII);
+        if (userIdBytes.length == 0 || userIdBytes.length > 24) {
+            throw new IllegalArgumentException("userId must contain between 1 and 24 ASCII bytes");
+        }
+        byte[] enrollData = new byte[26];
+        System.arraycopy(userIdBytes, 0, enrollData, 0, userIdBytes.length);
+        enrollData[24] = (byte) tempId;
+        enrollData[25] = 0x01;
+
+        int[] packet = ZKCommand.getPacketByte(CommandCodeEnum.CMD_STARTENROLL, sessionId, replyNo, enrollData);
+        sendPacket(packet);
+        replyNo++;
+        int[] response = readResponse();
+        CommandReplyCodeEnum replyCode = CommandReplyCodeEnum.decode(response[0] + (response[1] << 8));
+        int responseReplyId = response[6] + (response[7] << 8);
+        return new ZKCommandReply(replyCode, sessionId, responseReplyId,
+                Arrays.copyOfRange(response, 8, response.length));
     }
 
     private void sendPacket(int[] packetData) throws IOException {
@@ -2687,6 +3227,13 @@ public class ZKTerminal {
 
         for (int i = 0; i < response.length; i++) {
             response[i] = buf[i] & 0xFF;
+        }
+
+        if (Boolean.getBoolean("zkteco.debugProtocol") && response.length >= 8) {
+            System.out.println("UDP response: bytes=" + response.length
+                    + ", code=" + (response[0] | (response[1] << 8))
+                    + ", session=" + (response[4] | (response[5] << 8))
+                    + ", reply=" + (response[6] | (response[7] << 8)));
         }
 
         return response;
