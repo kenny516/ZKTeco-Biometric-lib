@@ -202,6 +202,15 @@ Store the JSON in a file or database JSON/text column, or store the profile and
 individual templates in user and fingerprint tables with binary/BLOB columns.
 Database connectivity is left to the application.
 
+The SQL Server example [create-biometric-schema.sql](scripts/sql-server/create-biometric-schema.sql)
+contains two simple `CREATE TABLE` statements: `ZKUsers` and `ZKFingerprints`.
+It stores templates as `VARBINARY(MAX)`, requires `CardNo` (`0` for no card),
+and permits one template per user/finger index. `UserId` links both tables.
+Reader UIDs, timestamps, diagnostic metadata and timezone settings are omitted.
+If timezone settings are needed, add columns for them; otherwise the Java profile
+defaults apply when reconstructing a user. Run the script in a database where
+these tables do not yet exist.
+
 ```java
 ObjectMapper mapper = new ObjectMapper();
 String json = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(data);
