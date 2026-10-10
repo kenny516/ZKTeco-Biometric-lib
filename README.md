@@ -11,14 +11,17 @@ Device and firmware compatibility must be verified on the reader being used.
 ## Build and test
 
 Download packaged builds from [GitHub Releases](https://github.com/kenny516/ZKTeco-Biometric-lib/releases).
-The initial release is `v1.0.0-beta.1`.
+The current prerelease is [v1.0.0-beta.2](https://github.com/kenny516/ZKTeco-Biometric-lib/releases/tag/v1.0.0-beta.2).
+It adds bulk user/fingerprint reading, simplifies terminal operations and examples,
+and includes the French API Javadoc.
 
 | Download | Use |
 | --- | --- |
-| `ZKTeco4J-1.0.0-beta.1.jar` | Library classes; supply the runtime dependencies from `pom.xml`. |
-| `ZKTeco4J-1.0.0-beta.1-all.jar` | Library with runtime dependencies included, convenient for a manually configured Java classpath. |
-| `ZKTeco4J-1.0.0-beta.1-sources.jar` | Sources for IDE navigation/debugging. |
-| `SHA256SUMS.txt` | Checksums for the three JARs. |
+| `ZKTeco4J-1.0.0-beta.2.jar` | Library classes; supply the runtime dependencies from `pom.xml`. |
+| `ZKTeco4J-1.0.0-beta.2-all.jar` | Library with runtime dependencies included, convenient for a manually configured Java classpath. |
+| `ZKTeco4J-1.0.0-beta.2-sources.jar` | Sources for IDE navigation/debugging. |
+| `ZKTeco4J-1.0.0-beta.2-javadoc.jar` | Extract and open `index.html`, or attach to the library in your IDE. |
+| `SHA256SUMS.txt` | Checksums for the four JARs. |
 
 These are library JARs, without an application entry point for `java -jar`.
 Add the library to your application's classpath. To create the same downloads locally:
@@ -56,8 +59,7 @@ mvn javadoc:javadoc
 ```
 
 Open `target/site/apidocs/index.html` in a browser. The `release` profile also
-attaches a `-javadoc.jar` to future packaged releases; the existing beta release
-does not yet contain that additional asset. Generation uses the
+attaches a `-javadoc.jar` to packaged releases, included since beta.2. Generation uses the
 [Maven Javadoc Plugin](https://maven.apache.org/plugins/maven-javadoc-plugin/usage.html).
 
 ## Connect to a reader
@@ -199,6 +201,15 @@ Jackson serializes template bytes as Base64 and reconstructs them as `byte[]`.
 Store the JSON in a file or database JSON/text column, or store the profile and
 individual templates in user and fingerprint tables with binary/BLOB columns.
 Database connectivity is left to the application.
+
+The SQL Server example [create-biometric-schema.sql](scripts/sql-server/create-biometric-schema.sql)
+contains two simple `CREATE TABLE` statements: `ZKUsers` and `ZKFingerprints`.
+It stores templates as `VARBINARY(MAX)`, requires `CardNo` (`0` for no card),
+and permits one template per user/finger index. `UserId` links both tables.
+Reader UIDs, timestamps, diagnostic metadata and timezone settings are omitted.
+If timezone settings are needed, add columns for them; otherwise the Java profile
+defaults apply when reconstructing a user. Run the script in a database where
+these tables do not yet exist.
 
 ```java
 ObjectMapper mapper = new ObjectMapper();
