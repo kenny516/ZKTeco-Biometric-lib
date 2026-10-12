@@ -1,10 +1,32 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
-    <groupId>ps.purelogic</groupId>
-    <artifactId>ZKTeco4J</artifactId>
-    <version>1.0.0-beta.2</version>
+    <groupId>io.github.kenny516</groupId>
+    <artifactId>zkteco-biometric-lib</artifactId>
+    <version>1.0.0-beta.3</version>
     <packaging>jar</packaging>
+    <name>ZKTeco Biometric Library</name>
+    <description>Java library for ZKTeco attendance readers, user profiles and fingerprint template export/import over UDP.</description>
+    <url>https://github.com/kenny516/ZKTeco-Biometric-lib</url>
+    <licenses>
+        <license>
+            <name>MIT License</name>
+            <url>https://opensource.org/licenses/MIT</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+    <developers>
+        <developer>
+            <id>kenny516</id>
+            <name>CHAN Kenny</name>
+            <url>https://github.com/kenny516</url>
+        </developer>
+    </developers>
+    <scm>
+        <connection>scm:git:https://github.com/kenny516/ZKTeco-Biometric-lib.git</connection>
+        <developerConnection>scm:git:ssh://git@github.com/kenny516/ZKTeco-Biometric-lib.git</developerConnection>
+        <url>https://github.com/kenny516/ZKTeco-Biometric-lib</url>
+    </scm>
     <dependencies>
         <dependency>
             <groupId>org.apache.commons</groupId>
@@ -38,8 +60,20 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.source>1.8</maven.compiler.source>
         <maven.compiler.target>1.8</maven.compiler.target>
+        <shade.skip>false</shade.skip>
+        <central.skipPublishing>false</central.skipPublishing>
     </properties>
     <build>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+            <resource>
+                <directory>${project.basedir}</directory>
+                <targetPath>META-INF</targetPath>
+                <includes><include>LICENSE</include></includes>
+            </resource>
+        </resources>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -95,6 +129,7 @@
                                 <goals><goal>shade</goal></goals>
                                 <configuration>
                                     <shadedArtifactAttached>true</shadedArtifactAttached>
+                                    <skip>${shade.skip}</skip>
                                     <shadedClassifierName>all</shadedClassifierName>
                                     <createDependencyReducedPom>false</createDependencyReducedPom>
                                     <filters>
@@ -113,6 +148,44 @@
                                 </configuration>
                             </execution>
                         </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <profile>
+            <id>central</id>
+            <properties>
+                <shade.skip>true</shade.skip>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-gpg-plugin</artifactId>
+                        <version>3.2.8</version>
+                        <configuration>
+                            <bestPractices>true</bestPractices>
+                            <passphraseEnvName>GPG_PASSPHRASE</passphraseEnvName>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>sign-artifacts</id>
+                                <phase>verify</phase>
+                                <goals><goal>sign</goal></goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.sonatype.central</groupId>
+                        <artifactId>central-publishing-maven-plugin</artifactId>
+                        <version>0.11.0</version>
+                        <extensions>true</extensions>
+                        <configuration>
+                            <publishingServerId>central</publishingServerId>
+                            <autoPublish>true</autoPublish>
+                            <waitUntil>published</waitUntil>
+                            <skipPublishing>${central.skipPublishing}</skipPublishing>
+                        </configuration>
                     </plugin>
                 </plugins>
             </build>
