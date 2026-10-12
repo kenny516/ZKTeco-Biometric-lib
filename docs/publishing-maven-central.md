@@ -70,6 +70,8 @@ mvn -P release clean verify
 ```
 
 This runs tests and produces all four GitHub JARs without requiring credentials.
+Use Maven 3.9.x for Central publishing. The workflow pins Maven 3.9.16 because
+Maven 3.10 adds staging metadata that this publisher does not remove.
 To verify signatures locally with your GPG key, set the `GPG_PASSPHRASE`
 environment variable and run:
 
