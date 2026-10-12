@@ -8,10 +8,28 @@ The implementation builds on the [zk-protocol specification](https://github.com/
 and the template transfer layouts used by [pyzk](https://github.com/fananimi/pyzk/blob/master/zk/base.py).
 Device and firmware compatibility must be verified on the reader being used.
 
+## Install with Maven
+
+The next release uses these Maven Central coordinates. Version `1.0.0-beta.3`
+is prepared for publication; availability depends on completing the publisher setup
+and running the release workflow successfully.
+
+```xml
+<dependency>
+    <groupId>io.github.kenny516</groupId>
+    <artifactId>zkteco-biometric-lib</artifactId>
+    <version>1.0.0-beta.3</version>
+</dependency>
+```
+
+Once published, no additional Maven repository is needed. Java packages remain
+`com.zkteco`. See [Publishing to Maven Central](docs/publishing-maven-central.md)
+for account setup, signing and releasing. This project is licensed under [MIT](LICENSE).
+
 ## Build and test
 
 Download packaged builds from [GitHub Releases](https://github.com/kenny516/ZKTeco-Biometric-lib/releases).
-The current prerelease is [v1.0.0-beta.2](https://github.com/kenny516/ZKTeco-Biometric-lib/releases/tag/v1.0.0-beta.2).
+The existing prerelease is [v1.0.0-beta.2](https://github.com/kenny516/ZKTeco-Biometric-lib/releases/tag/v1.0.0-beta.2).
 It adds bulk user/fingerprint reading, simplifies terminal operations and examples,
 and includes the French API Javadoc.
 
@@ -34,6 +52,11 @@ GitHub Actions runs tests and packages downloadable build artifacts on pushes to
 `dev`/`main` and pull requests. Pushing a `v*` tag also publishes the JARs and
 checksums as release assets; tags containing a hyphen are marked as prereleases.
 The workflow can also be run manually for build artifacts.
+
+Starting with beta.3, JAR filenames use `zkteco-biometric-lib` instead of `ZKTeco4J`.
+Previous releases remain available. Tags must match the POM version. Central
+publication runs only when the GitHub variable `MAVEN_CENTRAL_ENABLED` is `true`;
+the `all` JAR remains a GitHub download and is excluded from Central publication.
 
 The project targets Java 8 and uses Maven.
 
