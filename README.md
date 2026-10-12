@@ -10,9 +10,8 @@ Device and firmware compatibility must be verified on the reader being used.
 
 ## Install with Maven
 
-The next release uses these Maven Central coordinates. Version `1.0.0-beta.3`
-is prepared for publication; availability depends on completing the publisher setup
-and running the release workflow successfully.
+Version `1.0.0-beta.3` is available on
+[Maven Central](https://central.sonatype.com/artifact/io.github.kenny516/zkteco-biometric-lib/1.0.0-beta.3):
 
 ```xml
 <dependency>
@@ -22,23 +21,23 @@ and running the release workflow successfully.
 </dependency>
 ```
 
-Once published, no additional Maven repository is needed. Java packages remain
+No additional Maven repository is needed. Java packages remain
 `com.zkteco`. See [Publishing to Maven Central](docs/publishing-maven-central.md)
 for account setup, signing and releasing. This project is licensed under [MIT](LICENSE).
 
 ## Build and test
 
 Download packaged builds from [GitHub Releases](https://github.com/kenny516/ZKTeco-Biometric-lib/releases).
-The existing prerelease is [v1.0.0-beta.2](https://github.com/kenny516/ZKTeco-Biometric-lib/releases/tag/v1.0.0-beta.2).
-It adds bulk user/fingerprint reading, simplifies terminal operations and examples,
-and includes the French API Javadoc.
+The current prerelease is [v1.0.0-beta.3](https://github.com/kenny516/ZKTeco-Biometric-lib/releases/tag/v1.0.0-beta.3).
+It introduces Maven Central coordinates and the MIT license, and retains bulk
+user/fingerprint reading and the French API Javadoc.
 
 | Download | Use |
 | --- | --- |
-| `ZKTeco4J-1.0.0-beta.2.jar` | Library classes; supply the runtime dependencies from `pom.xml`. |
-| `ZKTeco4J-1.0.0-beta.2-all.jar` | Library with runtime dependencies included, convenient for a manually configured Java classpath. |
-| `ZKTeco4J-1.0.0-beta.2-sources.jar` | Sources for IDE navigation/debugging. |
-| `ZKTeco4J-1.0.0-beta.2-javadoc.jar` | Extract and open `index.html`, or attach to the library in your IDE. |
+| `zkteco-biometric-lib-1.0.0-beta.3.jar` | Library classes; supply the runtime dependencies from `pom.xml`. |
+| `zkteco-biometric-lib-1.0.0-beta.3-all.jar` | Library with runtime dependencies included, convenient for a manually configured Java classpath. |
+| `zkteco-biometric-lib-1.0.0-beta.3-sources.jar` | Sources for IDE navigation/debugging. |
+| `zkteco-biometric-lib-1.0.0-beta.3-javadoc.jar` | Extract and open `index.html`, or attach to the library in your IDE. |
 | `SHA256SUMS.txt` | Checksums for the four JARs. |
 
 These are library JARs, without an application entry point for `java -jar`.

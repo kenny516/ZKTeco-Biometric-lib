@@ -1,6 +1,8 @@
 # Publishing to Maven Central
 
 Coordinates: `io.github.kenny516:zkteco-biometric-lib:1.0.0-beta.3`.
+Beta.3 was published on October 12, 2026 and verified from an independent Maven
+project with a fresh local repository and no additional repository configuration.
 The existing Java packages and APIs are unchanged. GitHub keeps the standard,
 sources, Javadoc and `all` JARs; Central receives the standard JAR, sources,
 Javadoc and POM, with signatures and checksums.
@@ -41,6 +43,9 @@ Javadoc and POM, with signatures and checksums.
    Central job is skipped and GitHub builds/releases continue normally.
 
 ## Release beta.3
+
+Beta.3 is already published. The commands below describe its original release;
+use a new version and matching tag for subsequent releases.
 
 After the publishing changes are committed and pushed, run:
 
