@@ -1,6 +1,6 @@
 # Publishing to Maven Central
 
-Coordinates: `io.github.kenny516:zkteco-biometric-lib:1.0.0-beta.3`.
+Stable release coordinates: `io.github.kenny516:zkteco-biometric-lib:1.0.0`.
 Beta.3 was published on October 12, 2026 and verified from an independent Maven
 project with a fresh local repository and no additional repository configuration.
 The existing Java packages and APIs are unchanged. GitHub keeps the standard,
@@ -42,16 +42,16 @@ Javadoc and POM, with signatures and checksums.
    credentials and the public key are ready. When absent or not `true`, the
    Central job is skipped and GitHub builds/releases continue normally.
 
-## Release beta.3
+## Release 1.0.0
 
-Beta.3 is already published. The commands below describe its original release;
-use a new version and matching tag for subsequent releases.
+The stable release promotes beta.3 without changing the Java packages or APIs.
+Use a new version and matching tag for subsequent releases.
 
 After the publishing changes are committed and pushed, run:
 
 ```shell
-git tag -a v1.0.0-beta.3 -m "Release 1.0.0-beta.3"
-git push origin v1.0.0-beta.3
+git tag -a v1.0.0 -m "Release 1.0.0"
+git push origin v1.0.0
 ```
 
 The workflow checks the tag against `project.version`, runs the tests and creates
