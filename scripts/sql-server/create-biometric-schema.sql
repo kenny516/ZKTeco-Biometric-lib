@@ -1,4 +1,4 @@
-CREATE TABLE dbo.ZKUsers (
+CREATE TABLE dbo.ZkUsers (
     UserId VARCHAR(9) NOT NULL PRIMARY KEY,
     Name NVARCHAR(23) NOT NULL,
     Role VARCHAR(16) NOT NULL DEFAULT 'USER_DEFAULT',
@@ -7,12 +7,12 @@ CREATE TABLE dbo.ZKUsers (
     Enabled BIT NOT NULL DEFAULT 1,
     GroupId TINYINT NOT NULL DEFAULT 0
 );
-CREATE TABLE dbo.ZKFingerprints (
+CREATE TABLE dbo.ZkUserFingerprints (
     UserId VARCHAR(9) NOT NULL,
     FingerIndex TINYINT NOT NULL,
     Template VARBINARY(MAX) NOT NULL,
     PRIMARY KEY (UserId, FingerIndex),
-    FOREIGN KEY (UserId) REFERENCES dbo.ZKUsers(UserId) ON DELETE CASCADE
+    FOREIGN KEY (UserId) REFERENCES dbo.ZkUsers(UserId) ON DELETE CASCADE
 );
 CREATE TABLE dbo.ZkDevices (
     DeviceId INT NOT NULL PRIMARY KEY,
