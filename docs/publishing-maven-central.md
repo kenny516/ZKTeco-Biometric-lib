@@ -1,6 +1,7 @@
 # Publishing to Maven Central
 
 Stable release coordinates: `io.github.kenny516:zkteco-biometric-lib:1.0.0`.
+Version 1.0.0 was published on October 13, 2026 through the GitHub release workflow.
 Beta.3 was published on October 12, 2026 and verified from an independent Maven
 project with a fresh local repository and no additional repository configuration.
 The existing Java packages and APIs are unchanged. GitHub keeps the standard,
@@ -45,6 +46,7 @@ Javadoc and POM, with signatures and checksums.
 ## Release 1.0.0
 
 The stable release promotes beta.3 without changing the Java packages or APIs.
+Version 1.0.0 is already published; the commands below describe its release.
 Use a new version and matching tag for subsequent releases.
 
 After the publishing changes are committed and pushed, run:

@@ -10,7 +10,7 @@ Device and firmware compatibility must be verified on the reader being used.
 
 ## Install with Maven
 
-The stable release `1.0.0` is prepared for publication on
+The stable release `1.0.0` is available on
 [Maven Central](https://central.sonatype.com/artifact/io.github.kenny516/zkteco-biometric-lib/1.0.0):
 
 ```xml
