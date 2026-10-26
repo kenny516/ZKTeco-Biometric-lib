@@ -25,6 +25,56 @@ import java.util.List;
 
 public class ZKTerminalFingerprintReadTest {
     @Test
+    public void exportsCompleteFacialRecordAcrossPacketsAndRoundTripsJson() throws Exception {
+        int[] record = new int[2576];
+        record[0] = 3;
+        record[2] = 42;
+        record[5] = 1;
+        record[16] = 77;
+        try (Fixture fixture = new Fixture(packet(1500, 16, 10, 0, 0),
+                packet(1501, Arrays.copyOfRange(record, 0, 1000)),
+                packet(1501, Arrays.copyOfRange(record, 1000, record.length)), packet(2000))) {
+            List<com.zkteco.commands.FaceTemplate> faces = fixture.terminal.getUserFaceTemplates(42);
+            assertEquals(1, faces.size());
+            assertEquals(2576, faces.get(0).getSize());
+            assertEquals(77, faces.get(0).getTemplate()[16]);
+            byte[] requestBytes = new byte[128];
+            DatagramPacket request = new DatagramPacket(requestBytes, requestBytes.length);
+            fixture.device.receive(request);
+            assertEquals(150, requestBytes[0] & 255);
+            assertEquals(42, requestBytes[8] & 255);
+            assertEquals(50, requestBytes[10] & 255);
+            assertEquals(1234, fixture.client.getSoTimeout());
+            com.fasterxml.jackson.databind.ObjectMapper json = new com.fasterxml.jackson.databind.ObjectMapper();
+            com.zkteco.commands.UserFaceData snapshot = new com.zkteco.commands.UserFaceData(
+                    new UserInfo(42, "EMP1", "Alice", "", UserRoleEnum.USER_DEFAULT, 0), faces);
+            com.zkteco.commands.UserFaceData restored = json.readValue(json.writeValueAsString(snapshot),
+                    com.zkteco.commands.UserFaceData.class);
+            assertArrayEquals(faces.get(0).getTemplate(), restored.getFaces().get(0).getTemplate());
+        }
+    }
+
+    @Test
+    public void rejectsUnknownFacialFormatAndWrongUser() throws Exception {
+        try {
+            ZKTerminal.decodeFaceTemplates(42, new byte[12]);
+            fail("Expected unsupported format");
+        } catch (IOException expected) {
+            assertTrue(expected.getMessage().contains("Unsupported facial format"));
+        }
+        byte[] record = new byte[2576];
+        record[0] = 1;
+        record[2] = 43;
+        try {
+            ZKTerminal.decodeFaceTemplates(42, record);
+            fail("Expected UID mismatch");
+        } catch (IOException expected) {
+            assertTrue(expected.getMessage().contains("recordUid=43"));
+        }
+        assertTrue(ZKTerminal.decodeFaceTemplates(42, new byte[2576]).isEmpty());
+    }
+
+    @Test
     public void decodesUserRecordSplitAcrossPacketsWithoutSkippingSecondPayload() throws Exception {
         byte[] record = new UserRecordCodec(StandardCharsets.UTF_8).encode(
                 new UserInfo(64, "EMP1", "Alice", "", UserRoleEnum.USER_DEFAULT, 0));

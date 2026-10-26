@@ -1,18 +1,6 @@
 package com.zkteco.terminal;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.text.ParseException;
-import java.util.List;
-
-import com.zkteco.Enum.OnOffenum;
-import com.zkteco.command.events.EventCode;
-import com.zkteco.commands.AttendanceRecord;
-import com.zkteco.commands.SmsInfo;
-import com.zkteco.commands.UserInfo;
 import com.zkteco.commands.ZKCommandReply;
-import com.zkteco.iclockhelper.ZKTecoHttpServer;
-import com.zkteco.utils.HexUtils;
 
 //import java.io.IOException;
 //import java.util.Calendar;

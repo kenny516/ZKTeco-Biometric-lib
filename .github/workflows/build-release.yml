@@ -64,6 +64,8 @@ jobs:
             'These are library JARs, not standalone applications. Source JAR, French API Javadoc JAR and SHA-256 checksums are included.' \
             'Bulk reading is available through getAllUserWithFingerprints(): one profile list request, then up to ten fingerprint reads per user, with per-finger database errors retained in each snapshot.' \
             'Fingerprint import is covered by simulated UDP tests; recognition and firmware compatibility require device validation.' > release-notes.md
+          printf '%s\n' \
+            'Version 1.1.0 adds experimental legacy facial export through getUserWithFaces() and getUserFaceTemplates(), with Base64 JSON snapshots and simulated UDP tests. Only 2576-byte facial records are supported; facial restoration is not implemented.' >> release-notes.md
           flags=()
           if [[ "$RELEASE_TAG" == *-* ]]; then flags+=(--prerelease); fi
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then

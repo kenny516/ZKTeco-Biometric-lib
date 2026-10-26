@@ -18,12 +18,12 @@ import com.zkteco.terminal.ZKTerminal;
 public class MainTest {
     public static void main(String[] args) throws Exception {
         // Modifier les variables ici ; aucun argument de lancement nécessaire.
-        String deviceIp = "192.168.204.18";
+        String deviceIp = "192.168.204.8";
         int port = 4370;
         int commKey = 0;
-        String userId = "32002262";
+        String userId = "301011015";
         Path backupFile = Paths.get("biometric-backups", "user-" + userId + ".json");
-        boolean deleteAndRestore = true; // true : supprimer puis réajouter l'utilisateur sauvegardé.
+        boolean deleteAndRestore = false; // true : supprimer puis réajouter l'utilisateur sauvegardé.
         boolean realtime = false;
 
         ObjectMapper json = new ObjectMapper();
@@ -39,6 +39,17 @@ public class MainTest {
             List<UserInfo> users = terminal.getAllUsers();
             for (UserInfo user : users) {
                 System.out.println("Utilisateur : " + user.getUserid() + " | " + user.getName());
+            }
+
+            // Export facial indépendant : un échec de lecture empêche la suite du scénario.
+            com.zkteco.commands.UserFaceData faceData = terminal.getUserWithFaces(userId);
+            Path faceBackupFile = Paths.get("biometric-backups", "user-" + userId + "-faces.json");
+            Files.createDirectories(faceBackupFile.toAbsolutePath().getParent());
+            json.writerWithDefaultPrettyPrinter().writeValue(faceBackupFile.toFile(), faceData);
+            System.out.println("Templates faciaux récupérés : " + faceData.getFaces().size());
+            System.out.println("Sauvegarde faciale : " + faceBackupFile.toAbsolutePath());
+            if (deleteAndRestore && !faceData.getFaces().isEmpty()) {
+                throw new IllegalStateException("Restauration faciale non implémentée : suppression annulée.");
             }
 
             // 2. Exporter le profil et tous les templates récupérés (indices 0 à 9).
@@ -59,7 +70,8 @@ public class MainTest {
                 if (savedUser.getFingerprints().isEmpty()) {
                     throw new IllegalStateException("Aucune empreinte sauvegardée : suppression annulée.");
                 }
-                // Utiliser l'UID lu sur ce lecteur pendant l'export, pas celui d'un ancien JSON.
+                // Utiliser l'UID lu sur ce lecteur pendant l'export, pas celui d'un ancien
+                // JSON.
                 int currentUid = userData.getUser().getUid();
                 if (terminal.disableDevice().getCode() != CommandReplyCodeEnum.CMD_ACK_OK) {
                     throw new IllegalStateException("Désactivation refusée.");

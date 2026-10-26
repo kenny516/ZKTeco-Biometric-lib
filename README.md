@@ -2,7 +2,8 @@
 
 Java library for communicating with standalone ZKTeco attendance readers over
 UDP. It supports user profiles, attendance records, realtime attendance events,
-device settings, fingerprint enrollment, and fingerprint template export/import.
+device settings, fingerprint enrollment, fingerprint template export/import,
+and experimental legacy facial template export.
 
 The implementation builds on the [zk-protocol specification](https://github.com/adrobinoga/zk-protocol)
 and the template transfer layouts used by [pyzk](https://github.com/fananimi/pyzk/blob/master/zk/base.py).
@@ -10,14 +11,14 @@ Device and firmware compatibility must be verified on the reader being used.
 
 ## Install with Maven
 
-The stable release `1.0.0` is available on
-[Maven Central](https://central.sonatype.com/artifact/io.github.kenny516/zkteco-biometric-lib/1.0.0):
+Maven coordinates for release `1.1.0`
+([Maven Central](https://central.sonatype.com/artifact/io.github.kenny516/zkteco-biometric-lib/1.1.0)):
 
 ```xml
 <dependency>
     <groupId>io.github.kenny516</groupId>
     <artifactId>zkteco-biometric-lib</artifactId>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
 </dependency>
 ```
 
@@ -28,16 +29,16 @@ for account setup, signing and releasing. This project is licensed under [MIT](L
 ## Build and test
 
 Download packaged builds from [GitHub Releases](https://github.com/kenny516/ZKTeco-Biometric-lib/releases).
-The stable release tag is [v1.0.0](https://github.com/kenny516/ZKTeco-Biometric-lib/releases/tag/v1.0.0).
-It promotes beta.3 to a stable version with the same Java API, and retains bulk
-user/fingerprint reading and the French API Javadoc.
+The release tag is [v1.1.0](https://github.com/kenny516/ZKTeco-Biometric-lib/releases/tag/v1.1.0).
+It adds experimental legacy facial export and retains bulk user/fingerprint
+reading and the French API Javadoc.
 
 | Download | Use |
 | --- | --- |
-| `zkteco-biometric-lib-1.0.0.jar` | Library classes; supply the runtime dependencies from `pom.xml`. |
-| `zkteco-biometric-lib-1.0.0-all.jar` | Library with runtime dependencies included, convenient for a manually configured Java classpath. |
-| `zkteco-biometric-lib-1.0.0-sources.jar` | Sources for IDE navigation/debugging. |
-| `zkteco-biometric-lib-1.0.0-javadoc.jar` | Extract and open `index.html`, or attach to the library in your IDE. |
+| `zkteco-biometric-lib-1.1.0.jar` | Library classes; supply the runtime dependencies from `pom.xml`. |
+| `zkteco-biometric-lib-1.1.0-all.jar` | Library with runtime dependencies included, convenient for a manually configured Java classpath. |
+| `zkteco-biometric-lib-1.1.0-sources.jar` | Sources for IDE navigation/debugging. |
+| `zkteco-biometric-lib-1.1.0-javadoc.jar` | Extract and open `index.html`, or attach to the library in your IDE. |
 | `SHA256SUMS.txt` | Checksums for the four JARs. |
 
 These are library JARs, without an application entry point for `java -jar`.
@@ -217,7 +218,29 @@ database read failure; it does not by itself prove that the slot is empty.
 even when several valid templates were retrieved. Do not use it as a test for
 whether the fingerprint list is empty.
 
-## Store and restore the snapshot
+## Read a user with their facial templates
+
+Available since 1.1.0, this experimental API exports legacy facial records:
+
+```java
+UserFaceData data = terminal.getUserWithFaces("EMP0001");
+for (FaceTemplate face : data.getFaces()) {
+    System.out.println("Face " + face.getFaceIndex() + ": " + face.getSize() + " bytes");
+}
+// Lower-level API using the reader's internal UID:
+List<FaceTemplate> faces = terminal.getUserFaceTemplates(data.getUser().getUid());
+```
+
+Only complete 2576-byte records returned by command 150 with selector 50 are
+supported. Each record retains its device header, source UID and padding.
+Jackson serializes the records as Base64; these are biometric templates, not
+photographs. Unsupported commands, unknown formats and transfer failures throw
+an exception. Device and firmware support must be checked on the target reader.
+Stop realtime logs before reading. Facial restoration is not implemented.
+The `MainTest` example exports facial data separately and prevents deletion when
+facial records were retrieved, to avoid attempting an unsupported restoration.
+
+## Store and restore the fingerprint snapshot
 
 Jackson serializes template bytes as Base64 and reconstructs them as `byte[]`.
 Store the JSON in a file or database JSON/text column, or store the profile and
