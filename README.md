@@ -70,6 +70,31 @@ UDP writes, destination UID assignment, and upload failure/cleanup handling.
 They do not require a physical reader. Do not use `MainTest` as an automated
 test: it connects to the configured device and can modify its stored users.
 
+## Remote door opening
+
+After connecting and authenticating when required, request a temporary opening:
+
+```java
+ZKCommandReply reply = terminal.unlockDoor(5); // Five seconds
+if (reply.getCode() != CommandReplyCodeEnum.CMD_ACK_OK) {
+    throw new IOException("Door opening refused: " + reply.getCode());
+}
+```
+
+Imports: `com.zkteco.commands.ZKCommandReply`,
+`com.zkteco.Enum.CommandReplyCodeEnum`, and `java.io.IOException`.
+This API is available in the current source tree; published release 1.1.0 does
+not include it. Rebuild the library when using a JAR dependency.
+
+The reader must support `CMD_UNLOCK` and have a wired door relay. Durations
+must be positive and fit the protocol's unsigned 32-bit delay in tenths of a
+second (maximum 429496729 seconds); the firmware may impose tighter limits.
+The encoding follows [pyzk](https://github.com/fananimi/pyzk/blob/master/zk/base.py).
+An ACK confirms command acceptance, not physical door movement. Verify actual
+timing on your device. Do not run this command concurrently with the realtime
+listener or another command on the same client. A timeout is not retried
+automatically because the reader may already have opened the door.
+
 ## API Javadoc
 
 Public user/fingerprint APIs and their result objects include Javadoc with parameter

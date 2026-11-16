@@ -18,10 +18,10 @@ import com.zkteco.terminal.ZKTerminal;
 public class MainTest {
     public static void main(String[] args) throws Exception {
         // Modifier les variables ici ; aucun argument de lancement nécessaire.
-        String deviceIp = "192.168.204.8";
+        String deviceIp = "192.168.204.18";
         int port = 4370;
         int commKey = 0;
-        String userId = "301011015";
+        String userId = "30101101599";
         Path backupFile = Paths.get("biometric-backups", "user-" + userId + ".json");
         boolean deleteAndRestore = false; // true : supprimer puis réajouter l'utilisateur sauvegardé.
         boolean realtime = false;
@@ -34,6 +34,14 @@ public class MainTest {
             if (auth.getCode() != CommandReplyCodeEnum.CMD_ACK_OK) {
                 throw new IllegalStateException("Authentification refusée : " + auth.getCode());
             }
+            Thread.sleep(10000);
+            // Try to unlock the door for 5 seconds. If the command is refused, throw an
+            // exception.
+            ZKCommandReply reply = terminal.unlockDoor(5);
+            if (reply.getCode() != CommandReplyCodeEnum.CMD_ACK_OK) {
+                throw new IllegalStateException("Ouverture de porte refusée : " + reply.getCode());
+            }
+            System.out.println("Commande d'ouverture de porte acceptée (5 secondes).");
 
             // 1. Liste des utilisateurs présents sur le terminal biometrique.
             List<UserInfo> users = terminal.getAllUsers();
