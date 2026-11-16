@@ -2096,6 +2096,42 @@ public class ZKTerminal {
         return Collections.emptyMap();
     }
 
+    /**
+     * Demande l'ouverture temporaire de la porte sur un lecteur compatible.
+     * La durée est encodée sur 32 bits non signés en dixièmes de seconde,
+     * conformément à l'implémentation pyzk. Sa prise en charge dépend du firmware.
+     * Utiliser une session connectée et authentifiée si nécessaire, sans listener
+     * temps réel ni autre commande concurrente sur le même socket.
+     * Aucun nouvel essai automatique n'est effectué après un délai d'attente :
+     * la première commande peut déjà avoir été exécutée par le lecteur.
+     *
+     * @param durationSeconds durée demandée, de 1 à 429496729 secondes
+     * @return réponse du lecteur ; {@code CMD_ACK_OK} confirme l'acceptation de
+     *         la commande, sans garantir l'ouverture physique de la porte
+     * @throws IllegalArgumentException si la durée est hors limites
+     * @throws IOException si le socket n'est pas ouvert, si l'échange échoue
+     *                     ou si la réponse est trop courte
+     */
+    public ZKCommandReply unlockDoor(int durationSeconds) throws IOException {
+        if (durationSeconds <= 0 || durationSeconds > 429496729) {
+            throw new IllegalArgumentException("durationSeconds must be between 1 and 429496729");
+        }
+        if (socket == null || socket.isClosed() || address == null) {
+            throw new IOException("Connect to the device before unlocking the door");
+        }
+        byte[] duration = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN)
+                .putInt((int) (durationSeconds * 10L)).array();
+        sendPacket(ZKCommand.getPacketByte(CommandCodeEnum.CMD_UNLOCK, sessionId, replyNo, duration));
+        replyNo++;
+        int[] response = readResponse();
+        if (response.length < 8) {
+            throw new IOException("Truncated door unlock response");
+        }
+        CommandReplyCodeEnum code = CommandReplyCodeEnum.decode(response[0] | (response[1] << 8));
+        int responseId = response[6] | (response[7] << 8);
+        return new ZKCommandReply(code, sessionId, responseId, Arrays.copyOfRange(response, 8, response.length));
+    }
+
     // Ensure the machine to be at the authentication (Not verify)
     public ZKCommandReply setStartVerify() throws IOException {
         int[] toSend = ZKCommand.getPacketByte(CommandCodeEnum.CMD_STARTVERIFY, sessionId, replyNo, null);
