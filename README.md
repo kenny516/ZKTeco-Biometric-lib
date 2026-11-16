@@ -11,14 +11,14 @@ Device and firmware compatibility must be verified on the reader being used.
 
 ## Install with Maven
 
-Maven coordinates for release `1.1.0`
-([Maven Central](https://central.sonatype.com/artifact/io.github.kenny516/zkteco-biometric-lib/1.1.0)):
+Maven coordinates for release `1.2.0`
+([Maven Central](https://central.sonatype.com/artifact/io.github.kenny516/zkteco-biometric-lib/1.2.0)):
 
 ```xml
 <dependency>
     <groupId>io.github.kenny516</groupId>
     <artifactId>zkteco-biometric-lib</artifactId>
-    <version>1.1.0</version>
+    <version>1.2.0</version>
 </dependency>
 ```
 
@@ -29,16 +29,16 @@ for account setup, signing and releasing. This project is licensed under [MIT](L
 ## Build and test
 
 Download packaged builds from [GitHub Releases](https://github.com/kenny516/ZKTeco-Biometric-lib/releases).
-The release tag is [v1.1.0](https://github.com/kenny516/ZKTeco-Biometric-lib/releases/tag/v1.1.0).
-It adds experimental legacy facial export and retains bulk user/fingerprint
-reading and the French API Javadoc.
+The release tag is [v1.2.0](https://github.com/kenny516/ZKTeco-Biometric-lib/releases/tag/v1.2.0).
+It adds remote door opening through unlockDoor(int durationSeconds) and retains
+legacy facial export, bulk user/fingerprint reading and the French API Javadoc.
 
 | Download | Use |
 | --- | --- |
-| `zkteco-biometric-lib-1.1.0.jar` | Library classes; supply the runtime dependencies from `pom.xml`. |
-| `zkteco-biometric-lib-1.1.0-all.jar` | Library with runtime dependencies included, convenient for a manually configured Java classpath. |
-| `zkteco-biometric-lib-1.1.0-sources.jar` | Sources for IDE navigation/debugging. |
-| `zkteco-biometric-lib-1.1.0-javadoc.jar` | Extract and open `index.html`, or attach to the library in your IDE. |
+| `zkteco-biometric-lib-1.2.0.jar` | Library classes; supply the runtime dependencies from `pom.xml`. |
+| `zkteco-biometric-lib-1.2.0-all.jar` | Library with runtime dependencies included, convenient for a manually configured Java classpath. |
+| `zkteco-biometric-lib-1.2.0-sources.jar` | Sources for IDE navigation/debugging. |
+| `zkteco-biometric-lib-1.2.0-javadoc.jar` | Extract and open `index.html`, or attach to the library in your IDE. |
 | `SHA256SUMS.txt` | Checksums for the four JARs. |
 
 These are library JARs, without an application entry point for `java -jar`.
@@ -83,8 +83,7 @@ if (reply.getCode() != CommandReplyCodeEnum.CMD_ACK_OK) {
 
 Imports: `com.zkteco.commands.ZKCommandReply`,
 `com.zkteco.Enum.CommandReplyCodeEnum`, and `java.io.IOException`.
-This API is available in the current source tree; published release 1.1.0 does
-not include it. Rebuild the library when using a JAR dependency.
+This API is available since version 1.2.0.
 
 The reader must support `CMD_UNLOCK` and have a wired door relay. Durations
 must be positive and fit the protocol's unsigned 32-bit delay in tenths of a

@@ -1,8 +1,8 @@
 # Publishing to Maven Central
 
-Release coordinates: `io.github.kenny516:zkteco-biometric-lib:1.1.0`.
-Version 1.1.0 adds experimental legacy facial export, JSON snapshots and tests.
-Facial restoration is not implemented. Publish it with the matching `v1.1.0`
+Release coordinates: `io.github.kenny516:zkteco-biometric-lib:1.2.0`.
+Version 1.2.0 adds remote door opening with unlockDoor(int durationSeconds).
+Facial restoration is not implemented. Publish it with the matching `v1.2.0`
 tag, then verify the workflow and public dependency resolution.
 Version 1.0.0 was published on October 13, 2026 through the GitHub release workflow.
 Beta.3 was published on October 12, 2026 and verified from an independent Maven
@@ -46,16 +46,16 @@ Javadoc and POM, with signatures and checksums.
    credentials and the public key are ready. When absent or not `true`, the
    Central job is skipped and GitHub builds/releases continue normally.
 
-## Release 1.1.0
+## Release 1.2.0
 
-Version 1.0.0 is already published. Version 1.1.0 adds facial export APIs while
-retaining the existing Java packages and fingerprint APIs.
+Version 1.1.0 is already published. Version 1.2.0 adds remote door opening while
+retaining the existing Java packages, facial export and fingerprint APIs.
 
 After the publishing changes are committed and pushed, run:
 
 ```shell
-git tag -a v1.1.0 -m "Release 1.1.0"
-git push origin v1.1.0
+git tag -a v1.2.0 -m "Release 1.2.0"
+git push origin v1.2.0
 ```
 
 The workflow checks the tag against `project.version`, runs the tests and creates

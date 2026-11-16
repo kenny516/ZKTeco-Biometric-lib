@@ -3,7 +3,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>io.github.kenny516</groupId>
     <artifactId>zkteco-biometric-lib</artifactId>
-    <version>1.1.0</version>
+    <version>1.2.0</version>
     <packaging>jar</packaging>
     <name>ZKTeco Biometric Library</name>
     <description>Java library for ZKTeco attendance readers, user profiles, fingerprint template export/import and legacy facial template export over UDP.</description>
